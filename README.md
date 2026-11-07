@@ -7,11 +7,12 @@ An isometric Godot 4 game where you play a villain locked in a prison nobody has
 1. Install **Godot 4** (4.3 or newer, the standard version, not .NET) from https://godotengine.org/download
 2. Open Godot, click **Import**, and pick the `project.godot` file in this folder.
 3. Press **F5** (or the ▶ play button in the top-right corner).
-4. Wait for the earthquake, then walk with **WASD** or the **arrow keys** and punch with **Space** (or **J**). Tap it fast for a jab, jab, heavy-hook combo.
+4. Wait for the earthquake, then walk with **WASD** or the **arrow keys** and punch with a **left click** (toward the mouse), **Space** or **J**. Tap it fast for a jab, jab, heavy-hook combo.
 5. Knocked-out enemies drop glowing XP. Each time you level up, the game pauses and offers three super-villain powers: press **1**, **2** or **3** (or click a card) to pick one.
 6. The levels are big and the camera follows you. Clear every enemy, then step on the green lift to go up. Four levels: Cell Block C, Mess Hall, Security Wing, and the Captain's Yard boss fight.
-7. Beat Captain Brask and grab his master key. It leads to Solitary Confinement (coming next).
-8. Lose all your health and you're **CONTAINED**: press **R** to retry the level.
+7. Beat Captain Brask and grab his master key to open the lift down to **Solitary Confinement**.
+8. Enemies drop packs of **smokes**. In Solitary, walk up to **Turkey** and press **E** to trade smokes for relics and powers (**1/2/3** buy, **R** restocks, **E** leaves).
+9. Lose all your health and you're **CONTAINED**: press **R** to retry the level.
 
 ## What's in here
 
@@ -26,6 +27,7 @@ An isometric Godot 4 game where you play a villain locked in a prison nobody has
 | `scripts/boss.gd` | Captain Brask, the huge guard captain (first boss). |
 | `scripts/lift.gd` | The lift pad between levels. |
 | `scripts/key_pickup.gd` | Captain Brask's master key. |
+| `scripts/turkey.gd`, `scripts/shop.gd` | Turkey, the merchant in solitary, and his shop screen. |
 | `scripts/live_wire.gd` | Sparking live wires hanging from the ceiling. |
 | `shaders/` | Effects: fog, scanlines, character squash and hit flashes, swaying pillars, rippling floors, jittering wires. |
 | `scripts/block.gd` | Walls, cell bars, bunks, toilets and tables. |

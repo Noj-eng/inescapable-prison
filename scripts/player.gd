@@ -1,5 +1,5 @@
 extends CharacterBody2D
-## The villain. Walk with WASD or the arrow keys, punch with Space or J.
+## The villain. Walk with WASD or the arrow keys, punch with a left click, Space or J.
 ## Starts suspended in the containment rig until the earthquake drops them.
 ## Arms and shins are locked in heavy mechanical casings that crack off level
 ## by level; the last one is saved for the first boss.
@@ -10,6 +10,7 @@ signal health_changed(hp: int, max_hp: int)
 signal xp_changed(xp: int, needed: int, level: int)
 signal leveled_up
 signal died
+signal smokes_changed(smokes: int)
 
 const FX := preload("res://scripts/fx.gd")
 const CHARACTER_SHADER := preload("res://shaders/character.gdshader")
@@ -44,6 +45,18 @@ const ABILITIES := {
 }
 const MAX_ABILITY_LEVEL := 5
 
+## Relics: junk and contraband Turkey sells. Each one is a small, permanent perk.
+const RELICS := {
+	"spoon": {"name": "SHARPENED SPOON", "text": "Filed down on a cell floor for six years. Punches +40% damage.", "cost": 14},
+	"hot_sauce": {"name": "HOT SAUCE PACKET", "text": "Rub it on your knuckles. Heavy hooks hit 3x instead of 2x.", "cost": 16},
+	"slippers": {"name": "STOLEN SLIPPERS", "text": "The warden's own. Silent and comfy. Move 10% faster.", "cost": 10},
+	"rat": {"name": "NIBBLES THE RAT", "text": "Rides on your shoulder and fetches XP from far away.", "cost": 10},
+	"dice": {"name": "LOADED DICE", "text": "Carved from soap. Earn 50% more XP.", "cost": 18},
+	"carton": {"name": "CARTON OF SMOKES", "text": "Never smoked one. Just holding it calms you. +4 max health.", "cost": 12},
+	"photo": {"name": "WARDEN'S FAMILY PHOTO", "text": "Guards panic when they see it. Enemies drop double smokes.", "cost": 15},
+	"jumpsuit": {"name": "PADDED JUMPSUIT", "text": "Stuffed with mattress foam. Longer safety after being hit.", "cost": 12},
+}
+
 # --- state ---
 var held := true
 var hover := HOVER
@@ -60,6 +73,9 @@ var level := 1
 var xp := 0
 var abilities := {}              # ability id -> how many times taken
 var _knockouts := 0
+var smokes := 0                  # contraband: Turkey's currency
+var relics := {}                 # relic id -> true
+var _xp_bonus := 0.0
 
 var _t := 0.0
 var _knock := Vector2.ZERO
@@ -115,17 +131,20 @@ func _ready() -> void:
 func rank(id: String) -> int:
 	return abilities.get(id, 0)
 
+func has_relic(id: String) -> bool:
+	return relics.has(id)
+
 func punch_damage() -> float:
-	return 1.0 * (1.0 + 0.3 * rank("iron_knuckles"))
+	return 1.0 * (1.0 + 0.3 * rank("iron_knuckles") + (0.4 if has_relic("spoon") else 0.0))
 
 func punch_cooldown() -> float:
 	return 0.22 * pow(0.85, rank("quick_hands"))
 
 func move_speed() -> float:
-	return 120.0 * (1.0 + 0.12 * rank("fleet_feet"))
+	return 120.0 * (1.0 + 0.12 * rank("fleet_feet") + (0.1 if has_relic("slippers") else 0.0))
 
 func pickup_radius() -> float:
-	return 45.0 + 45.0 * rank("magnet")
+	return 45.0 + 45.0 * rank("magnet") + (70.0 if has_relic("rat") else 0.0)
 
 func xp_needed() -> int:
 	return 6 + (level - 1) * 5
@@ -149,7 +168,25 @@ func take_ability(id: String) -> void:
 	health_changed.emit(hp, max_hp)
 
 
+func add_smokes(amount: int) -> void:
+	smokes += amount
+	smokes_changed.emit(smokes)
+
+
+func take_relic(id: String) -> void:
+	relics[id] = true
+	if id == "carton":
+		max_hp += 4
+		heal(4)
+	health_changed.emit(hp, max_hp)
+
+
 func add_xp(amount: int) -> void:
+	if has_relic("dice"):
+		_xp_bonus += amount * 0.5
+		var extra := floori(_xp_bonus)
+		_xp_bonus -= extra
+		amount += extra
 	xp += amount
 	while xp >= xp_needed():
 		xp -= xp_needed()
@@ -161,7 +198,8 @@ func add_xp(amount: int) -> void:
 ## Everything needed to put the villain back as they were (for retrying a level).
 func snapshot() -> Dictionary:
 	return {"broken": broken.duplicate(), "level": level, "xp": xp,
-		"abilities": abilities.duplicate(), "max_hp": max_hp}
+		"abilities": abilities.duplicate(), "max_hp": max_hp,
+		"smokes": smokes, "relics": relics.duplicate()}
 
 
 func restore(s: Dictionary) -> void:
@@ -170,6 +208,9 @@ func restore(s: Dictionary) -> void:
 	xp = s["xp"]
 	abilities = s["abilities"].duplicate()
 	max_hp = s["max_hp"]
+	smokes = s["smokes"]
+	relics = s["relics"].duplicate()
+	smokes_changed.emit(smokes)
 	dead = false
 	held = false
 	hover = 0.0
@@ -222,7 +263,7 @@ func hit(from: Vector2, damage: int = 1, force: float = 220.0) -> void:
 	health_changed.emit(hp, max_hp)
 	_knock = (global_position - from).normalized() * force
 	_hurt_flash = 0.3
-	_invulnerable = INVULNERABLE_TIME
+	_invulnerable = INVULNERABLE_TIME * (1.6 if has_relic("jumpsuit") else 1.0)
 	shake(3.0 + damage * 2.0, 0.25)
 	if hp == 0:
 		dead = true
@@ -268,7 +309,7 @@ func _read_input() -> Vector2:
 
 
 func _punch_pressed() -> bool:
-	return Input.is_key_pressed(KEY_SPACE) or Input.is_key_pressed(KEY_J)
+	return Input.is_key_pressed(KEY_SPACE) or Input.is_key_pressed(KEY_J) or Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
 
 
 # --- every frame -----------------------------------------------------------------
@@ -325,6 +366,13 @@ func _physics_process(delta: float) -> void:
 
 	# Punch on each press (holding the key keeps punching at the cooldown rate).
 	var down := _punch_pressed()
+	if Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+		# A click punches toward the mouse pointer.
+		var to_mouse := get_global_mouse_position() - global_position
+		if to_mouse.length() > 6.0:
+			aim = Vector2(to_mouse.x, to_mouse.y * 2.0).normalized()
+			if absf(aim.x) > 0.1:
+				facing = signf(aim.x)
 	if down and _punch_cooldown <= 0.0:
 		_punch()
 	_punch_was_down = down
@@ -363,7 +411,7 @@ func _punch() -> void:
 		var flat := Vector2(d.x, d.y * 2.0)
 		var dist: float = flat.length() - enemy.hit_radius
 		if dist < reach and (flat.length() < 10.0 or flat.normalized().dot(aim) > PUNCH_ARC):
-			var dmg := punch_damage() * (2.0 if heavy else 1.0)
+			var dmg := punch_damage() * ((3.0 if has_relic("hot_sauce") else 2.0) if heavy else 1.0)
 			enemy.take_hit(global_position, dmg, 420.0 if heavy else 260.0)
 			landed = true
 	if landed:
@@ -529,6 +577,20 @@ func _draw_free() -> void:
 			# impact flash at the fist
 			draw_circle(hand, 9.0, Color(1.0, 0.95, 0.8, 0.25))
 	_head(o, facing)
+	if has_relic("rat"):
+		_draw_rat(o + Vector2(-11 * facing, -36))
+
+
+## Nibbles the rat, riding on his shoulder.
+func _draw_rat(at: Vector2) -> void:
+	var f := -facing
+	var twitch := sin(_t * 9.0) * 0.8
+	draw_line(at + Vector2(-4 * f, 1), at + Vector2(-9 * f, 4 + twitch), Color("c98a8a"), 1.0)  # tail
+	draw_circle(at, 3.4, Color("6a6560"))
+	draw_circle(at + Vector2(3 * f, -1.5), 2.4, Color("7a746e"))
+	draw_circle(at + Vector2(2 * f, -4), 1.2, Color("c98a8a"))  # ear
+	draw_circle(at + Vector2(5 * f, -1.5), 0.6, Color("ff8a8a"))  # nose
+	draw_circle(at + Vector2(3.5 * f, -2.3), 0.5, Color.BLACK)
 
 
 func _leg(foot: Vector2, stride: float, piece: int) -> void:

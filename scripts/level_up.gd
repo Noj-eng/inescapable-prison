@@ -53,8 +53,7 @@ func open(choices: Array, abilities: Dictionary, ranks: Dictionary, new_level: i
 		_text("[%d]" % (i + 1), Vector2(18, 16), Vector2(60, 24), 14, Color(0.7, 0.78, 0.9), false, card)
 		_text(abilities[id]["name"], Vector2(18, 52), Vector2(w - 36, 30), 20, Color.WHITE, false, card)
 		_text("RANK %d > %d" % [rank, rank + 1] if rank > 0 else "NEW", Vector2(18, 84), Vector2(w - 36, 20), 13, NEON, false, card)
-		var desc := _text(abilities[id]["text"], Vector2(18, 118), Vector2(w - 36, 90), 15, Color(0.82, 0.86, 0.94), false, card)
-		desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		var desc := _text(abilities[id]["text"], Vector2(18, 118), Vector2(w - 36, 90), 15, Color(0.82, 0.86, 0.94), false, card, true)
 	visible = true
 	get_tree().paused = true
 
@@ -94,11 +93,17 @@ func _pick(i: int) -> void:
 	chosen.emit(_choices[i])
 
 
-func _text(t: String, pos: Vector2, box: Vector2, font_size: int, color: Color, centered := false, parent: Control = null) -> Label:
+func _text(t: String, pos: Vector2, box: Vector2, font_size: int, color: Color, centered := false, parent: Control = null, wrap := false) -> Label:
 	var l := Label.new()
+	# Wrapping has to be on before the text goes in, or the label stretches
+	# to fit one long line and runs off the card.
+	if wrap:
+		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		l.custom_minimum_size = Vector2(box.x, 0)
+	else:
+		l.clip_text = true
 	l.text = t
 	l.position = pos
-	l.size = box
 	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	if centered:
 		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -106,4 +111,5 @@ func _text(t: String, pos: Vector2, box: Vector2, font_size: int, color: Color, 
 	l.add_theme_font_size_override("font_size", font_size)
 	l.add_theme_color_override("font_color", color)
 	(parent if parent else _root).add_child(l)
+	l.size = box
 	return l

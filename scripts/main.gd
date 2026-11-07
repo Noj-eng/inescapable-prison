@@ -12,6 +12,7 @@ extends Node2D
 ##   E  the lift to the next level (unlocks when the level is clear)
 ##   G  a guard comes in here     M  a security robot comes in here
 ##   C  Captain Brask, the first boss
+##   K  Turkey, the merchant in solitary
 ##   v  a steam vent in the floor
 ##   w  a severed live wire hanging from the ceiling
 ##
@@ -115,6 +116,7 @@ const LEVELS := [
 	{
 		"name": "THE CAPTAIN'S YARD",
 		"floor": "mixed",
+		"boss": true,
 		"map": [
 			"########################",
 			"#......................#",
@@ -132,8 +134,31 @@ const LEVELS := [
 			"#....o............o....#",
 			"#........v....w........#",
 			"#......................#",
-			"#......................#",
+			"#.....................E#",
 			"########################",
+		],
+	},
+	{
+		"name": "SOLITARY CONFINEMENT",
+		"floor": "steel",
+		"map": [
+			"######################################",
+			"#b..t#b..t#b..t#b..t#b..t#b..t#b..t#b#",
+			"#....#....#..G.#....#....#.M..#....#.#",
+			"#....#....#....#....#....#....#....#.#",
+			"##BB###BB###..###BB###BB###..###BB####",
+			"#.........w..........................#",
+			"#.......o.......o....G..o........w...#",
+			"#..........G.................G.......#",
+			"#.P................v................E#",
+			"#.....v.......M........G..v..........#",
+			"#.......o.......o.......o.....G......#",
+			"#.....................w..............#",
+			"##BB###BB###BB###..###BB###BB###....##",
+			"#....#....#....#....#....#....#......#",
+			"#....#....#....#..G.#....#....#...K..#",
+			"#b..t#b..t#b..t#b..t#b..t#b..t#b.x..t#",
+			"######################################",
 		],
 	},
 ]
@@ -153,6 +178,8 @@ const SCANLINES := preload("res://shaders/scanlines.gdshader")
 const LiveWireScript := preload("res://scripts/live_wire.gd")
 const XpOrbScript := preload("res://scripts/xp_orb.gd")
 const LevelUpScript := preload("res://scripts/level_up.gd")
+const TurkeyScript := preload("res://scripts/turkey.gd")
+const ShopScript := preload("res://scripts/shop.gd")
 
 var level_index := 0
 var world: Node2D
@@ -166,6 +193,9 @@ var enemies_left := 0
 var game_over := false
 var player_at_level_start: Dictionary = {}
 var level_up_screen: CanvasLayer
+var shop: CanvasLayer
+var turkey: Node2D
+var smokes_label: Control
 var _pending_level_ups := 0
 var _aftershock_timer := 20.0
 var _total_enemies := 0
@@ -209,6 +239,12 @@ func _ready() -> void:
 	level_up_screen.set_script(LevelUpScript)
 	level_up_screen.chosen.connect(_on_ability_chosen)
 	add_child(level_up_screen)
+	player.smokes_changed.connect(_on_smokes_changed)
+	shop = CanvasLayer.new()
+	shop.set_script(ShopScript)
+	shop.player = player
+	shop.bought.connect(_on_shop_bought)
+	add_child(shop)
 	_build_hud()
 	_load_level(0)
 
@@ -227,6 +263,8 @@ func _load_level(index: int) -> void:
 	spawns.clear()
 	rig = null
 	lift = null
+	turkey = null
+	shop.stock.clear()
 	_total_enemies = 0
 	_aftershock_timer = randf_range(16.0, 24.0)
 	player_at_level_start = player.snapshot()
@@ -300,6 +338,13 @@ func _load_level(index: int) -> void:
 					boss_at = at
 					has_boss = true
 				"E": lift_at = at
+				"K":
+					turkey = StaticBody2D.new()
+					turkey.set_script(TurkeyScript)
+					turkey.position = at
+					turkey.player = player
+					turkey.trade_requested.connect(_on_trade_requested)
+					world.add_child(turkey)
 				"v":
 					floor_node.vents.append(cell)
 					vents.append(at)
@@ -350,6 +395,8 @@ func _load_level(index: int) -> void:
 
 	if index == 0:
 		_run_opening()
+	elif turkey:
+		_run_solitary_intro()
 	elif has_boss:
 		_run_boss_intro(boss_at)
 	else:
@@ -445,7 +492,7 @@ func _process(delta: float) -> void:
 	# Every so often the earthquake rumbles on: an aftershock rolls through.
 	_aftershock_timer -= delta
 	if _aftershock_timer <= 0.0 and not player.held:
-		var boss_level := level_index == LEVELS.size() - 1
+		var boss_level: bool = LEVELS[level_index].get("boss", false)
 		_aftershock_timer = randf_range(10.0, 14.0) if boss_level else randf_range(18.0, 26.0)
 		var at: Vector2 = player.global_position + Vector2(randf_range(-160, 160), randf_range(-80, 80))
 		shockwave(at, 7.0, 320.0)
@@ -487,6 +534,11 @@ func _run_level_intro() -> void:
 	_spawn_wave()
 
 
+func _run_solitary_intro() -> void:
+	_say("SOLITARY CONFINEMENT\nThe quiet cells. Somebody down here is whistling.", Color("ffd23f"), 3.5)
+	_spawn_wave()
+
+
 func _run_boss_intro(at: Vector2) -> void:
 	_say(LEVELS[level_index]["name"], Color("ffd23f"), 2.0)
 	if not await _wait(2.5): return
@@ -521,6 +573,7 @@ func _on_enemy_defeated(at: Vector2, xp: int) -> void:
 	enemies_left -= 1
 	player.on_knockout()
 	_drop_xp(at, xp)
+	_drop_smokes(at, 2 if player.has_relic("photo") else 1)
 	_update_hostiles()
 	if enemies_left > 0:
 		return
@@ -530,13 +583,18 @@ func _on_enemy_defeated(at: Vector2, xp: int) -> void:
 	if lift:
 		lift.unlocked = true
 	if not await _wait(1.2): return
-	if level_index == LEVELS.size() - 2:
+	if turkey:
+		_say("Corridor clear.  Turkey's open for business.\nThe lift is open when you're ready.", Color("ffc24a"), 4.0)
+	elif level_index + 1 < LEVELS.size() and LEVELS[level_index + 1].get("boss", false):
 		_say("One casing left.  It won't crack for small fry.\nThe lift is open.  The captain is waiting.", Color("5ff3ff"), 4.0)
 	else:
 		_say("Level clear.  The lift is open.", Color("4dff88"), 3.0)
 
 
 func _on_lift_entered() -> void:
+	if level_index + 1 >= LEVELS.size():
+		_say("NEXT: THE MEDICAL WING\nNurse Greta is on shift... (coming soon)", Color("ffd23f"), 6.0)
+		return
 	var token := _level_token
 	var tween := create_tween()
 	tween.tween_property(fade, "color:a", 1.0, 0.5)
@@ -602,12 +660,40 @@ func _on_boss_defeated(at: Vector2) -> void:
 	key.picked_up.connect(_on_key_picked_up)
 	world.add_child(key)
 	_drop_xp(at, 20)
+	_drop_smokes(at, 10)
 
 
 func _on_key_picked_up() -> void:
-	_say("BRASK'S MASTER KEY ACQUIRED\nIt opens the way down to Solitary Confinement.", Color("ffd23f"), 4.0)
-	if not await _wait(5.0): return
-	_say("NEXT: SOLITARY CONFINEMENT\nSomeone called Turkey is waiting down there... (coming soon)", Color("ffd23f"), 6.0)
+	if lift:
+		lift.unlocked = true
+	_say("BRASK'S MASTER KEY ACQUIRED\nThe lift down to Solitary Confinement is open.", Color("ffd23f"), 4.0)
+
+
+func _drop_smokes(at: Vector2, amount: int) -> void:
+	for i in amount:
+		var pack := Node2D.new()
+		pack.set_script(XpOrbScript)
+		pack.smokes = true
+		pack.position = at
+		pack.player = player
+		world.add_child(pack)
+
+
+func _on_smokes_changed(n: int) -> void:
+	smokes_label.text = "SMOKES  x %d" % n
+
+
+func _on_trade_requested() -> void:
+	if game_over or level_up_screen.visible:
+		return
+	shop.open(turkey.greeting())
+
+
+func _on_shop_bought(kind: String, id: String) -> void:
+	if kind == "relic":
+		player.take_relic(id)
+	else:
+		player.take_ability(id)
 
 
 func _on_casing_broken(piece: int) -> void:
@@ -664,7 +750,7 @@ func _build_hud() -> void:
 	hud.add_child(alarm)
 
 	title_label = _chroma("", Vector2(28, 20), Vector2(600, 30), 20, Color("ffd23f"))
-	_chroma("MOVE [WASD]   PUNCH [SPACE/J]   PICK POWER [1/2/3]", Vector2(28, 48), Vector2(600, 20), 12, HUD_DIM)
+	_chroma("MOVE [WASD]   PUNCH [CLICK/SPACE]   PICK POWER [1/2/3]   TALK [E]", Vector2(28, 48), Vector2(600, 20), 12, HUD_DIM)
 
 	# Health meter
 	_chroma("VITALS", Vector2(28, 76), Vector2(200, 16), 11, HUD_DIM)
@@ -675,6 +761,7 @@ func _build_hud() -> void:
 	xp_bar = _neon_bar(Vector2(28, 136), Vector2(220, 10), Color("3dffb0"), 30)
 	xp_bar.value = 0.0
 	hostiles_label = _chroma("", Vector2(1068, 76), Vector2(200, 16), 11, Color("ff7a4a"))
+	smokes_label = _chroma("SMOKES  x 0", Vector2(28, 154), Vector2(200, 16), 11, Color("ff8a5a"))
 
 	# Restraint gauge: one segment per casing, lit while it's still locked on.
 	_chroma("RESTRAINTS", Vector2(1068, 20), Vector2(190, 16), 11, HUD_DIM)
