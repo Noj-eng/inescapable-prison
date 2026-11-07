@@ -13,6 +13,7 @@ extends Node2D
 ##   G  a guard comes in here     M  a security robot comes in here
 ##   C  Captain Brask, the first boss
 ##   K  Turkey, the merchant in solitary
+##   N  Nurse Greta, who patches you up
 ##   v  a steam vent in the floor
 ##   w  a severed live wire hanging from the ceiling
 ##
@@ -161,6 +162,34 @@ const LEVELS := [
 			"######################################",
 		],
 	},
+	{
+		"name": "THE MEDICAL WING",
+		"floor": "concrete",
+		"map": [
+			"####################################",
+			"#.c..c..c..c#.c..c..c..c#.c..c..c..#",
+			"#.b..b..b..b#.b..b..b..b#.b..b..b..#",
+			"#...G.......#....G......#.....G....#",
+			"#..v........#.......M...#...G......#",
+			"#.b..b..b..b#.b..b..b..b#.b..b..b..#",
+			"#...........#...........#..........#",
+			"#####..##########..##########..#####",
+			"#...................w..............#",
+			"#......v.o....G......o.....o.......#",
+			"#.P......................v.....G...#",
+			"#..........w...........M...........#",
+			"#..................................#",
+			"#####..##########..##########..#####",
+			"#...........#...........#..........#",
+			"#.xx........#..c...M.c..#........c.#",
+			"#.x.........#...........#..dddd....#",
+			"#.....G.....#....dd.....#...N......#",
+			"#.........x.#...G.......#..........#",
+			"#...x....xx.#..c...w.c..#.b..E..b..#",
+			"#...........#...........#..........#",
+			"####################################",
+		],
+	},
 ]
 
 const BlockScript := preload("res://scripts/block.gd")
@@ -180,6 +209,7 @@ const XpOrbScript := preload("res://scripts/xp_orb.gd")
 const LevelUpScript := preload("res://scripts/level_up.gd")
 const TurkeyScript := preload("res://scripts/turkey.gd")
 const ShopScript := preload("res://scripts/shop.gd")
+const GretaScript := preload("res://scripts/greta.gd")
 
 var level_index := 0
 var world: Node2D
@@ -195,6 +225,7 @@ var player_at_level_start: Dictionary = {}
 var level_up_screen: CanvasLayer
 var shop: CanvasLayer
 var turkey: Node2D
+var greta: Node2D
 var smokes_label: Control
 var _pending_level_ups := 0
 var _aftershock_timer := 20.0
@@ -264,6 +295,7 @@ func _load_level(index: int) -> void:
 	rig = null
 	lift = null
 	turkey = null
+	greta = null
 	shop.stock.clear()
 	_total_enemies = 0
 	_aftershock_timer = randf_range(16.0, 24.0)
@@ -338,6 +370,13 @@ func _load_level(index: int) -> void:
 					boss_at = at
 					has_boss = true
 				"E": lift_at = at
+				"N":
+					greta = StaticBody2D.new()
+					greta.set_script(GretaScript)
+					greta.position = at
+					greta.player = player
+					greta.patch_requested.connect(_on_patch_requested)
+					world.add_child(greta)
 				"K":
 					turkey = StaticBody2D.new()
 					turkey.set_script(TurkeyScript)
@@ -397,6 +436,9 @@ func _load_level(index: int) -> void:
 		_run_opening()
 	elif turkey:
 		_run_solitary_intro()
+	elif greta:
+		_say("THE MEDICAL WING\nThe drones here sedate first and ask questions never.", Color("ffd23f"), 3.5)
+		_spawn_wave()
 	elif has_boss:
 		_run_boss_intro(boss_at)
 	else:
@@ -585,7 +627,9 @@ func _on_enemy_defeated(at: Vector2, xp: int) -> void:
 	if lift:
 		lift.unlocked = true
 	if not await _wait(1.2): return
-	if turkey:
+	if greta:
+		_say("Ward clear.  Nurse Greta is at her station, if you need patching up.\nThe lift is open.", Color("8fffd0"), 4.0)
+	elif turkey:
 		_say("Corridor clear.  Turkey's open for business.\nThe lift is open when you're ready.", Color("ffc24a"), 4.0)
 	elif level_index + 1 < LEVELS.size() and LEVELS[level_index + 1].get("boss", false):
 		_say("One casing left.  It won't crack for small fry.\nThe lift is open.  The captain is waiting.", Color("5ff3ff"), 4.0)
@@ -595,7 +639,7 @@ func _on_enemy_defeated(at: Vector2, xp: int) -> void:
 
 func _on_lift_entered() -> void:
 	if level_index + 1 >= LEVELS.size():
-		_say("NEXT: THE MEDICAL WING\nNurse Greta is on shift... (coming soon)", Color("ffd23f"), 6.0)
+		_say("NEXT: MESS HALL B\nCaptain Willis and the cafeteria squad are waiting... (coming soon)", Color("ffd23f"), 6.0)
 		return
 	var token := _level_token
 	var tween := create_tween()
@@ -685,6 +729,20 @@ func _on_smokes_changed(n: int) -> void:
 	smokes_label.text = "SMOKES  x %d" % n
 
 
+func _on_patch_requested() -> void:
+	if game_over:
+		return
+	if not greta.used and player.hp < player.max_hp:
+		var said: String = greta.line()
+		greta.used = true
+		player.heal(player.max_hp)
+		_say("NURSE GRETA:  " + said + "\nHealth fully restored.", Color("8fffd0"), 3.0)
+	elif not greta.used:
+		_say("NURSE GRETA:  \"You're not even hurt. Next.\"", Color("8fffd0"), 2.5)
+	else:
+		_say("NURSE GRETA:  " + greta.line(), Color("8fffd0"), 2.5)
+
+
 func on_remote_used() -> void:
 	_say("// CLICK //   EVERYONE FREEZES", Color("8fd8ff"), 1.2)
 
@@ -756,7 +814,7 @@ func _build_hud() -> void:
 	hud.add_child(alarm)
 
 	title_label = _chroma("", Vector2(28, 20), Vector2(600, 30), 20, Color("ffd23f"))
-	_chroma("MOVE [WASD]   PUNCH [CLICK/SPACE]   PICK POWER [1/2/3]   TALK [E]", Vector2(28, 48), Vector2(600, 20), 12, HUD_DIM)
+	_chroma("MOVE [WASD]   PUNCH [CLICK/SPACE]   PICK POWER [1/2/3]   TALK [E]   REMOTE [Q]", Vector2(28, 48), Vector2(600, 20), 12, HUD_DIM)
 
 	# Health meter
 	_chroma("VITALS", Vector2(28, 76), Vector2(200, 16), 11, HUD_DIM)

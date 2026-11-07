@@ -17,7 +17,9 @@ const CHARACTER_SHADER := preload("res://shaders/character.gdshader")
 
 const HOVER := 16.0              # how high the rig holds the villain off the floor
 const PUNCH_REACH := 34.0        # how far a punch lands in front of him (floor distance)
-const PUNCH_ARC := 0.55          # how wide the punch hits (dot product with aim)
+const PUNCH_ARC := 0.5           # cos(60 degrees): the punch hits everything in a 120-degree arc
+const SWIPE_HALF_ANGLE := PI / 3.0
+const PUNCH_ARC_SHADER := preload("res://shaders/punch_arc.gdshader")
 const PUNCH_ANIM := 0.13         # seconds a punch is on screen
 const INVULNERABLE_TIME := 0.8   # seconds of safety after taking a hit
 
@@ -35,6 +37,7 @@ enum Piece { LEFT_ARM, RIGHT_ARM, LEFT_LEG, RIGHT_LEG }
 const ABILITIES := {
 	"iron_knuckles": {"name": "TITAN FISTS", "text": "Your punches land like wrecking balls. +30% damage."},
 	"quick_hands": {"name": "HYPER REFLEXES", "text": "Your nerves fire like a machine. Punch 15% faster."},
+	"long_reach": {"name": "KINETIC REACH", "text": "Your blows shove a wall of force ahead of them. Punch range +20%."},
 	"shockwave_fist": {"name": "SEISMIC SLAM", "text": "Every 3rd punch splits the floor with a shockwave."},
 	"static_discharge": {"name": "STORM CALLER", "text": "Lightning arcs from you to the nearest enemy every few seconds."},
 	"shrapnel_orbit": {"name": "TELEKINETIC STORM", "text": "Your mind spins shards of broken casing around you."},
@@ -85,6 +88,11 @@ var _knockouts := 0
 var smokes := 0                  # contraband: Turkey's currency
 var relics := {}                 # relic id -> true
 var _xp_bonus := 0.0
+var _swipe_holder: Node2D
+var _swipe: MeshInstance2D
+var _swipe_mat: ShaderMaterial
+var _swipe_t := 1.0
+var _swipe_len := 0.12
 var remote_cooldown := 0.0
 var _q_was_down := false
 
@@ -130,6 +138,19 @@ func _ready() -> void:
 	_glow.position = Vector2(0, -24)
 	add_child(_glow)
 
+	# The swipe arc lives in a squashed holder so it lies flat on the iso floor.
+	_swipe_holder = Node2D.new()
+	_swipe_holder.position = Vector2(0, -18)
+	_swipe_holder.scale = Vector2(1.0, 0.5)
+	add_child(_swipe_holder)
+	_swipe = MeshInstance2D.new()
+	_swipe.mesh = _arc_mesh()
+	_swipe_mat = ShaderMaterial.new()
+	_swipe_mat.shader = PUNCH_ARC_SHADER
+	_swipe.material = _swipe_mat
+	_swipe.visible = false
+	_swipe_holder.add_child(_swipe)
+
 	_cam = Camera2D.new()
 	_cam.zoom = Vector2(1.8, 1.8)
 	_cam.position_smoothing_enabled = true
@@ -150,6 +171,9 @@ func punch_damage() -> float:
 
 func punch_cooldown() -> float:
 	return 0.22 * pow(0.85, rank("quick_hands"))
+
+func punch_reach() -> float:
+	return PUNCH_REACH * (1.0 + 0.2 * rank("long_reach")) * (1.3 if has_relic("handcuffs") else 1.0)
 
 func move_speed() -> float:
 	return 120.0 * (1.0 + 0.12 * rank("fleet_feet") + (0.1 if has_relic("slippers") else 0.0))
@@ -330,6 +354,10 @@ func _punch_pressed() -> bool:
 # --- every frame -----------------------------------------------------------------
 
 func _process(delta: float) -> void:
+	if _swipe_t < 1.0:
+		_swipe_t = minf(1.0, _swipe_t + delta / _swipe_len)
+		_swipe_mat.set_shader_parameter("progress", _swipe_t)
+		_swipe.visible = _swipe_t < 1.0
 	if _shake_time > 0.0:
 		_shake_time -= delta
 		_cam.offset = Vector2(randf_range(-1, 1), randf_range(-1, 1)) * _shake_amount
@@ -426,7 +454,8 @@ func _punch() -> void:
 	_knock += Vector2(aim.x, aim.y * 0.5).normalized() * 90.0   # small lunge forward
 
 	var landed := false
-	var reach := PUNCH_REACH * (1.25 if heavy else 1.0) * (1.3 if has_relic("handcuffs") else 1.0)
+	var reach := punch_reach() * (1.25 if heavy else 1.0)
+	_start_swipe(reach, heavy)
 	var push := 1.4 if has_relic("weights") else 1.0
 	for enemy in get_tree().get_nodes_in_group("enemies"):
 		var d: Vector2 = enemy.global_position - global_position
@@ -447,6 +476,46 @@ func _punch() -> void:
 	if heavy and rank("shockwave_fist") > 0:
 		_shockwave_fist()
 	_combo = (_combo + 1) % 3
+
+
+## A unit 120-degree ring band facing +X; scaled to the punch reach when used.
+func _arc_mesh() -> ArrayMesh:
+	var verts := PackedVector2Array()
+	var uvs := PackedVector2Array()
+	var steps := 24
+	for i in steps + 1:
+		var t := float(i) / steps
+		var a := lerpf(-SWIPE_HALF_ANGLE, SWIPE_HALF_ANGLE, t)
+		var d := Vector2(cos(a), sin(a))
+		verts.append(d * 0.35)
+		uvs.append(Vector2(t, 0.0))
+		verts.append(d * 1.0)
+		uvs.append(Vector2(t, 1.0))
+	var idx := PackedInt32Array()
+	for i in steps:
+		var k := i * 2
+		idx.append_array([k, k + 1, k + 2, k + 1, k + 3, k + 2])
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = verts
+	arrays[Mesh.ARRAY_TEX_UV] = uvs
+	arrays[Mesh.ARRAY_INDEX] = idx
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	return mesh
+
+
+## Start the swipe animation: it sweeps across the punch arc and grows with reach.
+func _start_swipe(reach: float, heavy: bool) -> void:
+	_swipe_t = 0.0
+	_swipe_len = 0.16 if heavy else 0.11
+	_swipe.visible = true
+	_swipe.rotation = aim.angle()
+	_swipe.scale = Vector2.ONE * (reach + 10.0)
+	_swipe_mat.set_shader_parameter("sweep_dir", float(_punch_side))
+	_swipe_mat.set_shader_parameter("heavy", 1.0 if heavy else 0.0)
+	_swipe_mat.set_shader_parameter("tint", Color(1.0, 0.62, 0.3) if heavy else Color(0.75, 0.95, 1.0))
+	_swipe_mat.set_shader_parameter("progress", 0.0)
 
 
 func _hit_stop(seconds: float) -> void:
