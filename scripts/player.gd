@@ -94,6 +94,7 @@ var _swipe_mat: ShaderMaterial
 var _swipe_t := 1.0
 var _swipe_len := 0.12
 var remote_cooldown := 0.0
+var slowed := 0.0                # seconds left wading through slop
 var _q_was_down := false
 
 var _t := 0.0
@@ -176,7 +177,7 @@ func punch_reach() -> float:
 	return PUNCH_REACH * (1.0 + 0.2 * rank("long_reach")) * (1.3 if has_relic("handcuffs") else 1.0)
 
 func move_speed() -> float:
-	return 120.0 * (1.0 + 0.12 * rank("fleet_feet") + (0.1 if has_relic("slippers") else 0.0))
+	return 120.0 * (1.0 + 0.12 * rank("fleet_feet") + (0.1 if has_relic("slippers") else 0.0)) * (0.5 if slowed > 0.0 else 1.0)
 
 func pickup_radius() -> float:
 	return 45.0 + 45.0 * rank("magnet") + (70.0 if has_relic("rat") else 0.0)
@@ -423,6 +424,7 @@ func _physics_process(delta: float) -> void:
 	_passive_abilities(delta)
 
 	remote_cooldown = maxf(0.0, remote_cooldown - delta)
+	slowed = maxf(0.0, slowed - delta)
 	var q := Input.is_key_pressed(KEY_Q)
 	if q and not _q_was_down and has_relic("remote") and remote_cooldown <= 0.0:
 		_use_remote()

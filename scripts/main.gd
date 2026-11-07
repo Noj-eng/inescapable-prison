@@ -14,6 +14,8 @@ extends Node2D
 ##   C  Captain Brask, the first boss
 ##   K  Turkey, the merchant in solitary
 ##   N  Nurse Greta, who patches you up
+##   W  Captain Willis (boss of Mess Hall B). On his level, G and M mark
+##      where his squad pours in from the kitchen.
 ##   v  a steam vent in the floor
 ##   w  a severed live wire hanging from the ceiling
 ##
@@ -190,6 +192,37 @@ const LEVELS := [
 			"####################################",
 		],
 	},
+	{
+		"name": "MESS HALL B",
+		"floor": "mixed",
+		"boss": true,
+		"map": [
+			"################################",
+			"#..xx.....xx.......xx......xx..#",
+			"#....M..v....v........v...M....#",
+			"#.....G........G........G......#",
+			"#..............................#",
+			"#xcxcx..cxcxcxc..xcxcxcx..cxcxc#",
+			"#..............................#",
+			"#...........G...W...G..........#",
+			"#..............................#",
+			"#..ddddddd..ddddddd..ddddddd...#",
+			"#........................w.....#",
+			"#.v.......o.........o..........#",
+			"#..............................#",
+			"#..ddddddd..ddddddd..ddddddd...#",
+			"#..............................#",
+			"#.........o.........o........v.#",
+			"#..............................#",
+			"#..ddddddd..ddddddd..ddddddd...#",
+			"#..............................#",
+			"#...............v..............#",
+			"#.......w......................#",
+			"#..P........................E..#",
+			"#..............................#",
+			"################################",
+		],
+	},
 ]
 
 const BlockScript := preload("res://scripts/block.gd")
@@ -210,6 +243,7 @@ const LevelUpScript := preload("res://scripts/level_up.gd")
 const TurkeyScript := preload("res://scripts/turkey.gd")
 const ShopScript := preload("res://scripts/shop.gd")
 const GretaScript := preload("res://scripts/greta.gd")
+const WillisScript := preload("res://scripts/willis.gd")
 
 var level_index := 0
 var world: Node2D
@@ -226,6 +260,8 @@ var level_up_screen: CanvasLayer
 var shop: CanvasLayer
 var turkey: Node2D
 var greta: Node2D
+var willis: Node2D
+var boss_name_label: Control
 var smokes_label: Control
 var _pending_level_ups := 0
 var _aftershock_timer := 20.0
@@ -296,6 +332,7 @@ func _load_level(index: int) -> void:
 	lift = null
 	turkey = null
 	greta = null
+	willis = null
 	shop.stock.clear()
 	_total_enemies = 0
 	_aftershock_timer = randf_range(16.0, 24.0)
@@ -332,6 +369,7 @@ func _load_level(index: int) -> void:
 	var start := Vector2.ZERO
 	var boss_at := Vector2.ZERO
 	var has_boss := false
+	var willis_at := Vector2.INF
 	var lift_at := Vector2.INF
 	var vents: Array = []
 	var lamps: Array = []
@@ -370,6 +408,7 @@ func _load_level(index: int) -> void:
 					boss_at = at
 					has_boss = true
 				"E": lift_at = at
+				"W": willis_at = at
 				"N":
 					greta = StaticBody2D.new()
 					greta.set_script(GretaScript)
@@ -439,6 +478,8 @@ func _load_level(index: int) -> void:
 	elif greta:
 		_say("THE MEDICAL WING\nThe drones here sedate first and ask questions never.", Color("ffd23f"), 3.5)
 		_spawn_wave()
+	elif willis_at != Vector2.INF:
+		_run_willis_intro(willis_at)
 	elif has_boss:
 		_run_boss_intro(boss_at)
 	else:
@@ -593,8 +634,69 @@ func _run_boss_intro(at: Vector2) -> void:
 	boss.health_changed.connect(_on_boss_health_changed)
 	boss.defeated.connect(_on_boss_defeated)
 	boss_meter.value = 1.0
+	boss_name_label.text = "// CAPTAIN BRASK //"
 	boss_bar.visible = true
 	_say("CAPTAIN BRASK:  \"Back in the rig, inmate.\"\n(Lure his charge into a pillar to stun him.)", Color("ff8a5a"), 3.5)
+
+
+func _run_willis_intro(at: Vector2) -> void:
+	_say("MESS HALL B\nThe lunch rush is over.  Something smells wrong.", Color("ffd23f"), 2.5)
+	if not await _wait(2.5): return
+	willis = CharacterBody2D.new()
+	willis.set_script(WillisScript)
+	willis.target = player
+	willis.position = at
+	world.add_child(willis)
+	willis.health_changed.connect(_on_boss_health_changed)
+	willis.defeated.connect(_on_willis_defeated)
+	willis.call_squad.connect(_on_willis_call_squad)
+	boss_meter.value = 1.0
+	boss_name_label.text = "// CAPTAIN WILLIS & THE LUNCH SQUAD //"
+	boss_bar.visible = true
+	_say("CAPTAIN WILLIS:  \"Nobody skips the line in MY mess hall.\"\n(His tray blocks everything. Take out his squad to expose him.)", Color("ff8a5a"), 4.5)
+
+
+## Willis blows his whistle: a squad of cooks (and later kitchen robots)
+## pours out of the kitchen. Each wave is a little bigger.
+func _on_willis_call_squad(wave: int) -> void:
+	var cooks := 0
+	var robots := 0
+	var cook_limit := mini(3 + wave, 6)
+	var robot_limit := mini(wave - 1, 2)
+	for spawn in spawns:
+		if spawn[0] == "guard" and cooks < cook_limit:
+			cooks += 1
+			_spawn_enemy("cook", spawn[1])
+		elif spawn[0] == "robot" and robots < robot_limit:
+			robots += 1
+			_spawn_enemy("robot", spawn[1])
+	_update_hostiles()
+	if wave > 1:
+		_say("WILLIS:  *whistle*  \"SECOND SERVING!\"" if wave == 2 else "WILLIS:  *whistle*  \"EVERYBODY OUT HERE!\"", Color("ff8a5a"), 1.8)
+
+
+func _spawn_enemy(kind: String, at: Vector2) -> void:
+	var enemy := CharacterBody2D.new()
+	enemy.set_script(EnemyScript)
+	enemy.kind = kind
+	enemy.target = player
+	enemy.position = at
+	world.add_child(enemy)
+	enemy.defeated.connect(_on_enemy_defeated)
+	enemy.active = true
+	enemies_left += 1
+	_total_enemies += 1
+
+
+func _on_willis_defeated(at: Vector2) -> void:
+	boss_bar.visible = false
+	for e in get_tree().get_nodes_in_group("enemies"):
+		e.take_hit(at, 99.0, 300.0)   # the squad scatters
+	_say("CAPTAIN WILLIS IS DOWN.\nThe lunch squad scatters.  The lift is open.", Color("5ff3ff"), 4.0)
+	_drop_xp(at, 25)
+	_drop_smokes(at, 12)
+	if lift:
+		lift.unlocked = true
 
 
 func _spawn_wave() -> void:
@@ -617,6 +719,12 @@ func _on_enemy_defeated(at: Vector2, xp: int) -> void:
 	_drop_xp(at, xp)
 	_drop_smokes(at, 2 if player.has_relic("photo") else 1)
 	_update_hostiles()
+	if willis:
+		# On Willis's level, a cleared squad exposes him instead of ending the level.
+		if enemies_left == 0 and is_instance_valid(willis) and not willis._dead:
+			willis.squad_down()
+			_say("THE SQUAD IS DOWN.  WILLIS DROPPED HIS TRAY.\nHIT HIM NOW!", Color("4dff88"), 2.0)
+		return
 	if enemies_left > 0:
 		return
 	# Level clear: a casing cracks off, the villain catches their breath, and the lift opens.
@@ -639,7 +747,7 @@ func _on_enemy_defeated(at: Vector2, xp: int) -> void:
 
 func _on_lift_entered() -> void:
 	if level_index + 1 >= LEVELS.size():
-		_say("NEXT: MESS HALL B\nCaptain Willis and the cafeteria squad are waiting... (coming soon)", Color("ffd23f"), 6.0)
+		_say("NEXT: CELL BLOCK A\n(coming soon)", Color("ffd23f"), 6.0)
 		return
 	var token := _level_token
 	var tween := create_tween()
@@ -837,12 +945,12 @@ func _build_hud() -> void:
 
 	# Boss meter, top centre, hidden until the captain shows up.
 	boss_bar = Control.new()
-	boss_bar.position = Vector2(390, 18)
+	boss_bar.position = Vector2(390, 668)
 	boss_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hud.add_child(boss_bar)
-	var boss_name := _chroma("// CAPTAIN BRASK //", Vector2.ZERO, Vector2(500, 20), 15, Color("ff7a4a"), boss_bar)
-	boss_name.align = HORIZONTAL_ALIGNMENT_CENTER
-	for l in boss_name.get_children():
+	boss_name_label = _chroma("// CAPTAIN BRASK //", Vector2.ZERO, Vector2(500, 20), 15, Color("ff7a4a"), boss_bar)
+	boss_name_label.align = HORIZONTAL_ALIGNMENT_CENTER
+	for l in boss_name_label.get_children():
 		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	boss_meter = _neon_bar(Vector2(0, 24), Vector2(500, 14), Color("ff5a2e"), 40, boss_bar)
 	boss_bar.visible = false

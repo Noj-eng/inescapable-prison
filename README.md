@@ -12,8 +12,9 @@ An isometric Godot 4 game where you play a villain locked in a prison nobody has
 6. The levels are big and the camera follows you. Clear every enemy, then step on the green lift to go up. Four levels: Cell Block C, Mess Hall, Security Wing, and the Captain's Yard boss fight.
 7. Beat Captain Brask and grab his master key to open the lift down to **Solitary Confinement**.
 8. In the Medical Wing, walk up to **Nurse Greta** and press **E** to get patched back to full health (once per visit).
-9. Enemies drop packs of **smokes**. In Solitary, walk up to **Turkey** and press **E** to trade smokes for relics and powers (**1/2/3** buy, **R** restocks, **E** leaves).
-10. Lose all your health and you're **CONTAINED**: press **R** to retry the level.
+9. **Mess Hall B** is the next boss: Captain Willis hides behind a steel tray while his lunch squad is standing and lobs slop that leaves slowing puddles. Knock out the whole squad and he drops the tray: hit him then.
+10. Enemies drop packs of **smokes**. In Solitary, walk up to **Turkey** and press **E** to trade smokes for relics and powers (**1/2/3** buy, **R** restocks, **E** leaves).
+11. Lose all your health and you're **CONTAINED**: press **R** to retry the level.
 
 ## What's in here
 
@@ -30,6 +31,7 @@ An isometric Godot 4 game where you play a villain locked in a prison nobody has
 | `scripts/key_pickup.gd` | Captain Brask's master key. |
 | `scripts/turkey.gd`, `scripts/shop.gd` | Turkey, the merchant in solitary, and his shop screen. |
 | `scripts/greta.gd` | Nurse Greta in the Medical Wing. |
+| `scripts/willis.gd`, `scripts/slop.gd` | Captain Willis (Mess Hall B boss) and his flying slop. |
 | `scripts/live_wire.gd` | Sparking live wires hanging from the ceiling. |
 | `shaders/` | Effects: fog, scanlines, character squash and hit flashes, swaying pillars, rippling floors, jittering wires. |
 | `scripts/block.gd` | Walls, cell bars, bunks, toilets and tables. |

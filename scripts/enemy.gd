@@ -9,7 +9,7 @@ signal defeated(at: Vector2, xp: int)
 const CHARACTER_SHADER := preload("res://shaders/character.gdshader")
 const WAKE_DISTANCE := 260.0
 
-var kind := "guard"    # "guard" or "robot"
+var kind := "guard"    # "guard", "cook" (Mess Hall B squad) or "robot"
 var target: Node2D
 var hp := 3.0
 var active := false
@@ -40,6 +40,10 @@ func _ready() -> void:
 		hp = 4.0
 		speed = 55.0
 		xp_value = 4
+	elif kind == "cook":
+		hp = 3.0
+		speed = 78.0
+		xp_value = 3
 	_mat = ShaderMaterial.new()
 	_mat.shader = CHARACTER_SHADER
 	_mat.set_shader_parameter("body_height", 44.0)
@@ -174,12 +178,23 @@ func _draw_guard() -> void:
 	]), navy)
 	draw_rect(Rect2(o + Vector2(-7, -28), Vector2(14, 8)), Color("2f4470"))
 	draw_rect(Rect2(o + Vector2(2 * _facing - 2, -27), Vector2(4, 3)), Color("e0b03a"))  # badge
-	# arms and stun baton
+	if kind == "cook":
+		# white kitchen apron over the uniform
+		draw_colored_polygon(PackedVector2Array([
+			o + Vector2(-6, -27), o + Vector2(6, -27), o + Vector2(7, -12), o + Vector2(-7, -12)
+		]), Color("e9e6dc"))
+		draw_circle(o + Vector2(2, -18), 1.6, Color(0.55, 0.6, 0.25, 0.6))
+	# arms and stun baton (cooks swing a frying pan instead)
 	draw_line(o + Vector2(-9, -30), o + Vector2(-11, -16), navy, 4.0)
 	var hand := o + Vector2(11 * _facing, -18)
 	draw_line(o + Vector2(9 * _facing, -30), hand, navy, 4.0)
-	draw_line(hand, hand + Vector2(8 * _facing, -10), Color("1a1a1a"), 3.0)
-	draw_circle(hand + Vector2(8 * _facing, -10), 2.0, Color(1.0, 0.85, 0.3, 0.6 + 0.4 * sin(_t * 20.0)))
+	if kind == "cook":
+		draw_line(hand, hand + Vector2(6 * _facing, -8), Color("3a3a40"), 2.5)
+		draw_circle(hand + Vector2(9 * _facing, -13), 5.0, Color("2a2a30"))
+		draw_circle(hand + Vector2(9 * _facing, -13), 3.5, Color("4a4a52"))
+	else:
+		draw_line(hand, hand + Vector2(8 * _facing, -10), Color("1a1a1a"), 3.0)
+		draw_circle(hand + Vector2(8 * _facing, -10), 2.0, Color(1.0, 0.85, 0.3, 0.6 + 0.4 * sin(_t * 20.0)))
 	# helmet with a red visor
 	var head := o + Vector2(0, -38)
 	draw_circle(head, 6.5, Color("d1b39a"))
@@ -187,6 +202,11 @@ func _draw_guard() -> void:
 		head + Vector2(-7, 0), head + Vector2(-6, -6), head + Vector2(0, -8), head + Vector2(6, -6), head + Vector2(7, 0)
 	]), navy_dark)
 	draw_rect(Rect2(head + Vector2(-5 + 2 * _facing, -1), Vector2(10, 3)), Color("e84a4a"))
+	if kind == "cook":
+		# a hairnet over the helmet, regulations are regulations
+		draw_arc(head + Vector2(0, -2), 7.5, PI, TAU, 12, Color(1, 1, 1, 0.45), 1.0)
+		for i in 4:
+			draw_line(head + Vector2(-6 + i * 4, -8), head + Vector2(-5 + i * 3.5, -1), Color(1, 1, 1, 0.3), 0.8)
 
 
 func _draw_robot() -> void:

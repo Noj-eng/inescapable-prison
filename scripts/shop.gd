@@ -166,11 +166,11 @@ func close() -> void:
 	closed.emit()
 
 
-func _text(t: String, pos: Vector2, box: Vector2, font_size: int, color: Color, centered := false, parent: Control = null, wrap := false) -> Label:
+func _text(t: String, pos: Vector2, box: Vector2, font_size: int, color: Color, centered := false, parent: Control = null, wrap_lines := false) -> Label:
 	var l := Label.new()
 	# Wrapping has to be on before the text goes in, or the label stretches
 	# to fit one long line and runs off the card.
-	if wrap:
+	if wrap_lines:
 		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		l.custom_minimum_size = Vector2(box.x, 0)
 	else:
