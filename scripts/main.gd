@@ -13,6 +13,10 @@ extends Node2D
 ##   G  a guard comes in here     M  a security robot comes in here
 ##   C  Captain Brask, the first boss
 ##   v  a steam vent in the floor
+##   w  a severed live wire hanging from the ceiling
+##
+## Levels are bigger than the screen: the camera follows the villain, and
+## enemies wait in their own area until he gets close.
 ##
 ## Edit a map, press Play, and the level rebuilds itself.
 
@@ -24,65 +28,112 @@ const LEVELS := [
 		"name": "CELL BLOCK C",
 		"floor": "concrete",
 		"map": [
-			"###############",
-			"#b..#b..#b..#E#",
-			"#...#...#...#G#",
-			"#t..#t..#t..#v#",
-			"#BBB#B.B#BBB#.#",
-			"#.............#",
-			"#.....R...v...#",
-			"#..d.....d....#",
-			"#G...........M#",
-			"###############",
+			"################################",
+			"#b..#b..#b..#b..################",
+			"#...#...#...#...#####..........#",
+			"#t..#t..#t..#t..#####..........#",
+			"#BBB#BBB#BBB#B.B#####..cc..c...#",
+			"#................####..........#",
+			"#..............v.####.......G..#",
+			"#..G.............####...Go.....#",
+			"#..............................#",
+			"#.......R.................v....#",
+			"#.............M........x.....x.#",
+			"#...d.......d....####......Mxx.#",
+			"#................####..........#",
+			"######...################..#####",
+			"#..............######..........#",
+			"#......o....G..######......x.M.#",
+			"#..xx.....xx...######..xx......#",
+			"#......v...............x..o....#",
+			"#..xx..........................#",
+			"#....M...M..v..######.G..G..xE.#",
+			"#..............######..........#",
+			"################################",
 		],
 	},
 	{
 		"name": "LEVEL 2:  MESS HALL",
 		"floor": "concrete",
 		"map": [
-			"###############",
-			"#P............#",
-			"#.dd..dd..dd.G#",
-			"#......v......#",
-			"#.dd..dd..dd..#",
-			"#M............#",
-			"#.dd..dd..dd..#",
-			"#.......G.....#",
-			"#G..........ME#",
-			"###############",
+			"##################################",
+			"#......##................##......#",
+			"#.P...................v..##.dddd.#",
+			"#..........dddd..dddd....##......#",
+			"#......##....................GM..#",
+			"#########...G....................#",
+			"#########..dddd..dddd....##...cc.#",
+			"#########................##......#",
+			"#########......o...M..o..##.v..M.#",
+			"#########..dddd..dddd....##...c..#",
+			"#########................##....x.#",
+			"#########....G...........##......#",
+			"#########..dddd..dddd....####..###",
+			"#########............G...####..###",
+			"#########........................#",
+			"############..########.....G...x.#",
+			"############..########..xx..xx...#",
+			"#.......................x........#",
+			"#..G.....x........G.......v......#",
+			"#...xx.........xx...........xx...#",
+			"#......M....v...........x........#",
+			"#.E......x.............G......M..#",
+			"#................................#",
+			"##################################",
 		],
 	},
 	{
 		"name": "LEVEL 3:  SECURITY WING",
 		"floor": "steel",
 		"map": [
-			"###############",
-			"#P....x...x...#",
-			"#..o.....o..M.#",
-			"#.....xx......#",
-			"#M....v....c..#",
-			"#..o..c..o....#",
-			"#.....xx....G.#",
-			"#.G...........#",
-			"#.....M.....ME#",
-			"###############",
+			"##################################",
+			"#.....####.......................#",
+			"#.P...####......M..............x.#",
+			"#...........c.c.c.c....xx..xx....#",
+			"#.....####.............x......M..#",
+			"#.....####........M..........c...#",
+			"##..######..G..o..........M......#",
+			"##..######.........v...G...x...x.#",
+			"##..######.......................#",
+			"##..##########..#####............#",
+			"##..##########..############..####",
+			"##..####...............#####..####",
+			"##.G####..o..o..o..o...#####..####",
+			"##..####.M...M...................#",
+			"##..####........v...G.......G....#",
+			"##..####..o..o..o..o...###.......#",
+			"##..####...............###.BB.BB.#",
+			"#................................#",
+			"#............o.....v........o....#",
+			"#....o........G......o........M..#",
+			"#........o.......o............v..#",
+			"#.E...M....v........M......G.....#",
+			"#................................#",
+			"##################################",
 		],
 	},
 	{
-		"name": "LEVEL 4:  THE CAPTAIN'S YARD",
+		"name": "THE CAPTAIN'S YARD",
 		"floor": "mixed",
 		"map": [
-			"#################",
-			"#P..............#",
-			"#...............#",
-			"#..o.........o..#",
-			"#.......v.......#",
-			"#.........C.....#",
-			"#...............#",
-			"#..o.........o..#",
-			"#.......v.......#",
-			"#...............#",
-			"#################",
+			"########################",
+			"#......................#",
+			"#.P....................#",
+			"#..........v...........#",
+			"#....o............o....#",
+			"#......................#",
+			"#.......v.......w......#",
+			"#......................#",
+			"#..........o...........#",
+			"#......w.....C.........#",
+			"#......................#",
+			"#..............v.......#",
+			"#......................#",
+			"#....o............o....#",
+			"#........v....w........#",
+			"#......................#",
+			"#......................#",
+			"########################",
 		],
 	},
 ]
@@ -94,11 +145,14 @@ const RigScript := preload("res://scripts/rig.gd")
 const EnemyScript := preload("res://scripts/enemy.gd")
 const BossScript := preload("res://scripts/boss.gd")
 const LiftScript := preload("res://scripts/lift.gd")
-const RiflePickupScript := preload("res://scripts/rifle_pickup.gd")
+const KeyPickupScript := preload("res://scripts/key_pickup.gd")
 const AtmosphereScript := preload("res://scripts/atmosphere.gd")
 const NeonBarScript := preload("res://scripts/neon_bar.gd")
 const ChromaLabelScript := preload("res://scripts/chroma_label.gd")
 const SCANLINES := preload("res://shaders/scanlines.gdshader")
+const LiveWireScript := preload("res://scripts/live_wire.gd")
+const XpOrbScript := preload("res://scripts/xp_orb.gd")
+const LevelUpScript := preload("res://scripts/level_up.gd")
 
 var level_index := 0
 var world: Node2D
@@ -110,7 +164,14 @@ var player: CharacterBody2D
 var spawns: Array = []          # [kind, screen position] for each enemy entrance
 var enemies_left := 0
 var game_over := false
-var casings_at_level_start: Array = []
+var player_at_level_start: Dictionary = {}
+var level_up_screen: CanvasLayer
+var _pending_level_ups := 0
+var _aftershock_timer := 20.0
+var _total_enemies := 0
+var hostiles_label: Control
+var xp_bar: Control
+var level_label: Control
 var _level_token := 0           # changes on every level load, so old timers know to stop
 
 var hud: CanvasLayer
@@ -142,6 +203,12 @@ func _ready() -> void:
 	player.casing_broken.connect(_on_casing_broken)
 	player.health_changed.connect(_on_health_changed)
 	player.died.connect(_on_player_died)
+	player.xp_changed.connect(_on_xp_changed)
+	player.leveled_up.connect(_on_leveled_up)
+	level_up_screen = CanvasLayer.new()
+	level_up_screen.set_script(LevelUpScript)
+	level_up_screen.chosen.connect(_on_ability_chosen)
+	add_child(level_up_screen)
 	_build_hud()
 	_load_level(0)
 
@@ -160,7 +227,9 @@ func _load_level(index: int) -> void:
 	spawns.clear()
 	rig = null
 	lift = null
-	casings_at_level_start = player.broken.duplicate()
+	_total_enemies = 0
+	_aftershock_timer = randf_range(16.0, 24.0)
+	player_at_level_start = player.snapshot()
 
 	if player.get_parent():
 		player.get_parent().remove_child(player)
@@ -211,6 +280,9 @@ func _load_level(index: int) -> void:
 				"#":
 					# Back walls stand tall, inner walls are half height, and walls on
 					# the front edge are kept short so they never hide the villain.
+					# Solid rock with no floor next to it is never seen, so skip it.
+					if not _touches_floor(map, x, y):
+						continue
 					var front := x == cols - 1 or y == rows - 1
 					var back := x == 0 or y == 0
 					_add_block("wall_low" if front else ("wall" if back else "wall_mid"), at)
@@ -231,13 +303,21 @@ func _load_level(index: int) -> void:
 				"v":
 					floor_node.vents.append(cell)
 					vents.append(at)
+				"w":
+					var wire := Node2D.new()
+					wire.set_script(LiveWireScript)
+					wire.position = at
+					world.add_child(wire)
 	floor_node.cells = floor_cells
 
 	atmosphere = Node2D.new()
 	atmosphere.set_script(AtmosphereScript)
 	add_child(atmosphere)
-	var beacons := [grid_to_screen(Vector2(1, 1)) + Vector2(0, -60), grid_to_screen(Vector2(cols - 2, rows - 2)) + Vector2(0, -20)]
+	var beacons := []
+	for corner in [Vector2(1, 1), Vector2(cols - 2, 1), Vector2(1, rows - 2), Vector2(cols - 2, rows - 2), Vector2(cols / 2, rows / 2)]:
+		beacons.append(grid_to_screen(corner) + Vector2(0, -50))
 	atmosphere.setup(bounds, lamps, vents, beacons, index > 0)
+	_build_paths(map)
 
 	if lift_at != Vector2.INF:
 		# The lift lives on the floor layer, so it is cleared away with the level.
@@ -261,10 +341,12 @@ func _load_level(index: int) -> void:
 		player.held = false
 		player.hover = 0.0
 	world.add_child(player)
+	player.set_camera_limits(bounds.grow(160))
 	player.snap_camera()
 
 	title_label.text = level["name"]
 	boss_bar.visible = false
+	_update_hostiles()
 
 	if index == 0:
 		_run_opening()
@@ -272,6 +354,66 @@ func _load_level(index: int) -> void:
 		_run_boss_intro(boss_at)
 	else:
 		_run_level_intro()
+
+
+# --- Path finding: lets enemies walk around walls between rooms ------------------
+
+const SOLID := "#Bbtdxoc"
+var _astar: AStarGrid2D
+
+
+func _build_paths(map: Array) -> void:
+	_astar = AStarGrid2D.new()
+	_astar.region = Rect2i(0, 0, map[0].length(), map.size())
+	_astar.diagonal_mode = AStarGrid2D.DIAGONAL_MODE_ONLY_IF_NO_OBSTACLES
+	_astar.update()
+	for y in map.size():
+		for x in map[0].length():
+			if SOLID.contains(map[y][x]):
+				_astar.set_point_solid(Vector2i(x, y))
+
+
+static func screen_to_grid(p: Vector2) -> Vector2i:
+	var gx := (p.x / (TILE_W * 0.5) + p.y / (TILE_H * 0.5)) * 0.5
+	var gy := (p.y / (TILE_H * 0.5) - p.x / (TILE_W * 0.5)) * 0.5
+	return Vector2i(roundi(gx), roundi(gy))
+
+
+## Where to walk next to get from one point to another around the walls.
+## Returns the goal itself when it's close or there is no path.
+func path_next(from: Vector2, to: Vector2) -> Vector2:
+	if _astar == null:
+		return to
+	var a := screen_to_grid(from)
+	var b := screen_to_grid(to)
+	if a == b or not _astar.is_in_boundsv(a) or not _astar.is_in_boundsv(b) or _astar.is_point_solid(a) or _astar.is_point_solid(b):
+		return to
+	var path := _astar.get_id_path(a, b)
+	if path.size() <= 2:
+		return to
+	return grid_to_screen(Vector2(path[1]))
+
+
+## How many steps apart two points are on foot (a big number if unreachable).
+func path_length(from: Vector2, to: Vector2) -> int:
+	if _astar == null:
+		return 0
+	var a := screen_to_grid(from)
+	var b := screen_to_grid(to)
+	if not _astar.is_in_boundsv(a) or not _astar.is_in_boundsv(b) or _astar.is_point_solid(a) or _astar.is_point_solid(b):
+		return 999
+	var path := _astar.get_id_path(a, b)
+	return path.size() if path.size() > 0 else 999
+
+
+func _touches_floor(map: Array, x: int, y: int) -> bool:
+	for dy in [-1, 0, 1]:
+		for dx in [-1, 0, 1]:
+			var yy: int = y + dy
+			var xx: int = x + dx
+			if yy >= 0 and yy < map.size() and xx >= 0 and xx < map[0].length() and map[yy][xx] != "#":
+				return true
+	return false
 
 
 func _add_block(kind: String, at: Vector2) -> void:
@@ -285,6 +427,31 @@ func _add_block(kind: String, at: Vector2) -> void:
 
 
 # --- Level scripts ----------------------------------------------------------------
+
+## A shockwave: the floor ripples out from a point, and nearby walls and
+## pillars shake (closer ones harder).
+func shockwave(at: Vector2, strength: float, radius: float) -> void:
+	floor_node.ripple(at, strength)
+	for block in get_tree().get_nodes_in_group("shakeable"):
+		var d: Vector2 = block.global_position - at
+		var dist: float = Vector2(d.x, d.y * 2.0).length()
+		if dist < radius * 2.5:
+			block.impact(1.0 - dist / (radius * 2.5))
+
+
+func _process(delta: float) -> void:
+	if game_over or get_tree().paused or not floor_node:
+		return
+	# Every so often the earthquake rumbles on: an aftershock rolls through.
+	_aftershock_timer -= delta
+	if _aftershock_timer <= 0.0 and not player.held:
+		var boss_level := level_index == LEVELS.size() - 1
+		_aftershock_timer = randf_range(10.0, 14.0) if boss_level else randf_range(18.0, 26.0)
+		var at: Vector2 = player.global_position + Vector2(randf_range(-160, 160), randf_range(-80, 80))
+		shockwave(at, 7.0, 320.0)
+		player.shake(3.0, 0.8)
+		_say("// AFTERSHOCK //", Color("ffd23f"), 1.0)
+
 
 ## Waits, then returns false if the level changed while we were waiting.
 func _wait(seconds: float) -> bool:
@@ -301,6 +468,7 @@ func _run_opening() -> void:
 
 	# The earthquake: everything shakes, the floor splits, the rig shorts out.
 	player.shake(7.0, 2.0)
+	shockwave(rig.position, 12.0, 600.0)
 	floor_node.add_cracks(rig.position, 7)
 	rig.fail()
 	_say("!!  SEISMIC EVENT  !!", Color("ffd23f"), 1.4)
@@ -315,8 +483,7 @@ func _run_opening() -> void:
 
 
 func _run_level_intro() -> void:
-	_say(LEVELS[level_index]["name"], Color("ffd23f"), 2.0)
-	if not await _wait(1.5): return
+	_say(LEVELS[level_index]["name"] + "\nClear every area to open the lift.", Color("ffd23f"), 3.0)
 	_spawn_wave()
 
 
@@ -346,10 +513,15 @@ func _spawn_wave() -> void:
 		world.add_child(enemy)
 		enemy.defeated.connect(_on_enemy_defeated)
 		enemies_left += 1
+		_total_enemies += 1
+	_update_hostiles()
 
 
-func _on_enemy_defeated() -> void:
+func _on_enemy_defeated(at: Vector2, xp: int) -> void:
 	enemies_left -= 1
+	player.on_knockout()
+	_drop_xp(at, xp)
+	_update_hostiles()
 	if enemies_left > 0:
 		return
 	# Level clear: a casing cracks off, the villain catches their breath, and the lift opens.
@@ -375,26 +547,67 @@ func _on_lift_entered() -> void:
 	create_tween().tween_property(fade, "color:a", 0.0, 0.6)
 
 
-func _on_boss_health_changed(hp: int, max_hp: int) -> void:
+func _on_boss_health_changed(hp: float, max_hp: float) -> void:
 	boss_meter.value = float(hp) / max_hp
+
+
+func _drop_xp(at: Vector2, amount: int) -> void:
+	for i in amount:
+		var orb := Node2D.new()
+		orb.set_script(XpOrbScript)
+		orb.position = at
+		orb.player = player
+		world.add_child(orb)
+
+
+func _update_hostiles() -> void:
+	if hostiles_label:
+		hostiles_label.text = "HOSTILES  %02d / %02d" % [enemies_left, _total_enemies] if _total_enemies > 0 else ""
+
+
+func _on_xp_changed(xp: int, needed: int, lvl: int) -> void:
+	xp_bar.value = float(xp) / needed
+	level_label.text = "LV %02d" % lvl
+
+
+func _on_leveled_up() -> void:
+	_pending_level_ups += 1
+	if _pending_level_ups == 1:
+		_open_level_up.call_deferred()
+
+
+func _open_level_up() -> void:
+	if game_over:
+		_pending_level_ups = 0
+		return
+	level_up_screen.open(player.roll_choices(), player.ABILITIES, player.abilities, player.level - _pending_level_ups + 1)
+
+
+func _on_ability_chosen(id: String) -> void:
+	player.take_ability(id)
+	_say(player.ABILITIES[id]["name"] + " ACQUIRED", Color("4ff0ff"), 1.5)
+	_pending_level_ups -= 1
+	if _pending_level_ups > 0:
+		_open_level_up.call_deferred()
 
 
 func _on_boss_defeated(at: Vector2) -> void:
 	boss_bar.visible = false
 	player.break_final_casing()
 	_say("CAPTAIN BRASK IS DOWN.\nThe last casing shatters.", Color("5ff3ff"), 3.0)
-	var rifle := Node2D.new()
-	rifle.set_script(RiflePickupScript)
-	rifle.position = at
-	rifle.player = player
-	rifle.picked_up.connect(_on_rifle_picked_up)
-	world.add_child(rifle)
+	var key := Node2D.new()
+	key.set_script(KeyPickupScript)
+	key.position = at
+	key.player = player
+	key.picked_up.connect(_on_key_picked_up)
+	world.add_child(key)
+	_drop_xp(at, 20)
 
 
-func _on_rifle_picked_up() -> void:
-	_say("PLASMA RIFLE ACQUIRED\nClick or press F to fire.", Color("d9a8ff"), 4.0)
-	if not await _wait(6.0): return
-	_say("END OF DEMO\nThe second boss is still out there...", Color("ffd23f"), 6.0)
+func _on_key_picked_up() -> void:
+	_say("BRASK'S MASTER KEY ACQUIRED\nIt opens the way down to Solitary Confinement.", Color("ffd23f"), 4.0)
+	if not await _wait(5.0): return
+	_say("NEXT: SOLITARY CONFINEMENT\nSomeone called Turkey is waiting down there... (coming soon)", Color("ffd23f"), 6.0)
 
 
 func _on_casing_broken(piece: int) -> void:
@@ -415,10 +628,11 @@ func _on_player_died() -> void:
 func _retry() -> void:
 	game_over = false
 	game_over_panel.visible = false
-	player.revive(player.MAX_HP, casings_at_level_start)
+	Engine.time_scale = 1.0
+	player.restore(player_at_level_start)
 	for i in 4:
 		restraint_pips[i].value = 0.0 if player.broken[i] else 1.0
-	_on_health_changed(player.hp, player.MAX_HP)
+	_on_health_changed(player.hp, player.max_hp)
 	_load_level(level_index)
 
 
@@ -450,11 +664,17 @@ func _build_hud() -> void:
 	hud.add_child(alarm)
 
 	title_label = _chroma("", Vector2(28, 20), Vector2(600, 30), 20, Color("ffd23f"))
-	_chroma("MOVE [WASD]   SLAM [SPACE]   FIRE [CLICK/F]", Vector2(28, 48), Vector2(600, 20), 12, HUD_DIM)
+	_chroma("MOVE [WASD]   PUNCH [SPACE/J]   PICK POWER [1/2/3]", Vector2(28, 48), Vector2(600, 20), 12, HUD_DIM)
 
 	# Health meter
 	_chroma("VITALS", Vector2(28, 76), Vector2(200, 16), 11, HUD_DIM)
 	health_bar = _neon_bar(Vector2(28, 94), Vector2(220, 16), Color("ff3d6e"), 20)
+
+	# Experience meter and level
+	level_label = _chroma("LV 01", Vector2(28, 118), Vector2(80, 16), 11, Color("4ff0ff"))
+	xp_bar = _neon_bar(Vector2(28, 136), Vector2(220, 10), Color("3dffb0"), 30)
+	xp_bar.value = 0.0
+	hostiles_label = _chroma("", Vector2(1068, 76), Vector2(200, 16), 11, Color("ff7a4a"))
 
 	# Restraint gauge: one segment per casing, lit while it's still locked on.
 	_chroma("RESTRAINTS", Vector2(1068, 20), Vector2(190, 16), 11, HUD_DIM)

@@ -25,20 +25,46 @@ var kind := "wall"
 var seed_value := 0
 var _t := 0.0
 var _rng := RandomNumberGenerator.new()
+var _mat: ShaderMaterial
+var _tremor := 0.0
+var _shear := 0.0
 
 
 func _ready() -> void:
 	var shape := CollisionPolygon2D.new()
 	shape.polygon = _diamond(SHAPES[kind][0], 0.0)
 	add_child(shape)
+	# Structural instability: pillars creak and sway on their own; walls,
+	# bars, crates and consoles shake when an aftershock or impact hits.
+	if kind in ["pillar", "wall", "wall_mid", "bars", "crate", "console"]:
+		_mat = ShaderMaterial.new()
+		_mat.shader = preload("res://shaders/sway.gdshader")
+		_mat.set_shader_parameter("height", SHAPES[kind][1])
+		_mat.set_shader_parameter("sway", 0.9 if kind == "pillar" else 0.0)
+		_mat.set_shader_parameter("seed", float(seed_value % 1000))
+		material = _mat
+		add_to_group("shakeable")
+
 	# Tall things fade out when the villain walks behind them; pillars and
 	# consoles also animate (sparking wires, blinking screens).
-	set_process(kind in ["pillar", "console", "wall_mid", "crate", "bars"])
+	set_process(kind in ["pillar", "console", "wall", "wall_mid", "crate", "bars"])
 	queue_redraw()
+
+
+## Something heavy hit nearby (an aftershock) or slammed into this block.
+## shear leaves a lasting lean on pillars: hit one often enough and it buckles.
+func impact(strength: float, shear := 0.0) -> void:
+	_tremor = maxf(_tremor, clampf(strength, 0.0, 1.0))
+	if kind == "pillar":
+		_shear = clampf(_shear + shear, -12.0, 12.0)
 
 
 func _process(delta: float) -> void:
 	_t += delta
+	if _mat:
+		_tremor = move_toward(_tremor, 0.0, delta * 1.2)
+		_mat.set_shader_parameter("tremor", _tremor)
+		_mat.set_shader_parameter("shear", _shear)
 	if kind == "pillar" or kind == "console":
 		queue_redraw()
 	var player := get_tree().get_first_node_in_group("player") as Node2D

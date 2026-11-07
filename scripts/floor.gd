@@ -19,7 +19,26 @@ var _shadow_drawer: Node2D
 var _shadows: Array[PackedVector2Array] = []
 
 
+var _ripple: ShaderMaterial
+var _ripple_age := 100.0
+
+
+## Start an aftershock ring rolling across the floor from a point.
+func ripple(origin: Vector2, strength: float) -> void:
+	_ripple_age = 0.0
+	_ripple.set_shader_parameter("origin", origin)
+	_ripple.set_shader_parameter("strength", strength)
+
+
+func _process(delta: float) -> void:
+	_ripple_age += delta
+	_ripple.set_shader_parameter("age", _ripple_age)
+
+
 func _ready() -> void:
+	_ripple = ShaderMaterial.new()
+	_ripple.shader = preload("res://shaders/floor_ripple.gdshader")
+	material = _ripple
 	# Shadows are drawn solid into a group, then the whole group is faded, so
 	# overlapping shadows don't stack into dark blotches.
 	_shadow_group = CanvasGroup.new()

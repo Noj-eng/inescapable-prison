@@ -1,13 +1,19 @@
 extends CharacterBody2D
 const FX := preload("res://scripts/fx.gd")
-## A prison guard or a security robot. Chases the villain and shoves them
-## on contact. Knock it out with casing slams.
+## A prison guard or a security robot. Waits in its area until the villain
+## comes close (or hits it), then chases and shoves on contact.
+## Knocked out, it drops XP.
 
-signal defeated
+signal defeated(at: Vector2, xp: int)
+
+const CHARACTER_SHADER := preload("res://shaders/character.gdshader")
+const WAKE_DISTANCE := 260.0
 
 var kind := "guard"    # "guard" or "robot"
 var target: Node2D
-var hp := 3
+var hp := 3.0
+var active := false
+var xp_value := 3
 var speed := 70.0
 var damage := 1
 var hit_radius := 0.0   # extra reach for attacks aimed at this enemy (big bodies)
@@ -21,13 +27,23 @@ var _dead := false
 var _t := 0.0
 var _detour := Vector2.ZERO   # sidestep direction while walking around an obstacle
 var _detour_time := 0.0
+var _mat: ShaderMaterial
+var _squash := 0.0
+var _waypoint := Vector2.INF
+var _repath := 0.0
 
 
 func _ready() -> void:
 	add_to_group("enemies")
 	if kind == "robot":
-		hp = 4
+		hp = 4.0
 		speed = 55.0
+		xp_value = 4
+	_mat = ShaderMaterial.new()
+	_mat.shader = CHARACTER_SHADER
+	_mat.set_shader_parameter("body_height", 44.0)
+	_mat.set_shader_parameter("seed", randf() * 100.0)
+	material = _mat
 	var shape := CollisionShape2D.new()
 	var circle := CircleShape2D.new()
 	circle.radius = 7.0
@@ -46,13 +62,15 @@ func _ready() -> void:
 	create_tween().tween_property(self, "modulate:a", 1.0, 0.4)
 
 
-func take_hit(from: Vector2) -> void:
+func take_hit(from: Vector2, damage_taken: float = 1.0, force: float = 280.0) -> void:
 	if _dead:
 		return
-	hp -= 1
-	_flash = 0.15
-	_knock = (global_position - from).normalized() * 280.0
-	if hp <= 0:
+	active = true
+	hp -= damage_taken
+	_flash = 0.18
+	_squash = 0.45
+	_knock = (global_position - from).normalized() * force
+	if hp <= 0.0:
 		_die()
 
 
@@ -61,9 +79,12 @@ func _die() -> void:
 	remove_from_group("enemies")
 	collision_layer = 0
 	collision_mask = 0
-	defeated.emit()
+	defeated.emit(global_position, xp_value)
 	var tween := create_tween()
+	tween.set_parallel(true)
 	tween.tween_property(self, "modulate", Color(1, 1, 1, 0), 0.6)
+	tween.tween_property(self, "_squash", 1.0, 0.4)   # crumple to the floor
+	tween.set_parallel(false)
 	tween.tween_callback(queue_free)
 
 
@@ -72,13 +93,33 @@ func _physics_process(delta: float) -> void:
 	_flash = maxf(0.0, _flash - delta)
 	_touch_cooldown -= delta
 	queue_redraw()
+	# attack and damage animation through the vertex shader
+	if not _dead:
+		_squash = move_toward(_squash, 0.0, delta * 3.0)
+	_mat.set_shader_parameter("hit", clampf(_flash * 6.0, 0.0, 1.0))
+	_mat.set_shader_parameter("squash", _squash)
+	_mat.set_shader_parameter("lean", _facing * (0.12 if active and not _dead else 0.0) - _knock.x / 900.0)
+	var level_root := get_tree().current_scene
+	if not active and is_instance_valid(target) and not target.held:
+		# wake up when the villain is close *and* actually reachable (not behind a wall)
+		if global_position.distance_to(target.global_position) < WAKE_DISTANCE:
+			if not level_root.has_method("path_length") or level_root.path_length(global_position, target.global_position) < 11:
+				active = true
+	# route around walls toward the villain
+	_repath -= delta
+	if active and _repath <= 0.0 and is_instance_valid(target) and level_root.has_method("path_next"):
+		_repath = 0.35
+		_waypoint = level_root.path_next(global_position, target.global_position)
 
 	var move := Vector2.ZERO
-	if not _dead and is_instance_valid(target) and not target.dead:
+	if active and not _dead and is_instance_valid(target) and not target.dead:
 		var to := target.global_position - global_position
 		var flat := Vector2(to.x, to.y * 2.0)
 		if flat.length() > 16.0:
-			var dir := flat.normalized()
+			var goal := to
+			if _waypoint != Vector2.INF and flat.length() > 50.0:
+				goal = _waypoint - global_position
+			var dir := Vector2(goal.x, goal.y * 2.0).normalized()
 			if _detour_time > 0.0:
 				_detour_time -= delta
 				dir = (dir * 0.3 + _detour).normalized()
@@ -102,10 +143,6 @@ func _physics_process(delta: float) -> void:
 
 func _draw() -> void:
 	FX.draw_character_shadow(self, 11.0, 44.0)
-	if _flash > 0.0:
-		self_modulate = Color(3, 3, 3)
-	else:
-		self_modulate = Color.WHITE
 	if kind == "robot":
 		_draw_robot()
 	else:

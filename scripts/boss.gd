@@ -2,13 +2,13 @@ extends CharacterBody2D
 ## Captain Brask, the huge guard captain and first boss.
 ## Swings a shock maul when you're close and charges when you keep away.
 ## Bait a charge into a wall and he's stunned: hits then do double damage.
-## Beating him breaks the villain's last casing and drops the plasma rifle.
+## Beating him breaks the villain's last casing and drops his master key.
 
 signal defeated(at: Vector2)
-signal health_changed(hp: int, max_hp: int)
+signal health_changed(hp: float, max_hp: float)
 
 const FX := preload("res://scripts/fx.gd")
-const MAX_HP := 24
+const MAX_HP := 40
 const WALK_SPEED := 48.0
 const CHARGE_SPEED := 300.0
 const SWING_REACH := 60.0     # floor distance the maul swing covers
@@ -17,7 +17,7 @@ const CHARGE_WINDUP := 0.8
 const STUN_TIME := 1.6
 
 var target: Node2D
-var hp := MAX_HP
+var hp := float(MAX_HP)
 var hit_radius := 14.0        # big body, easier to hit
 
 var _state := "chase"
@@ -34,6 +34,8 @@ var _spot: PointLight2D
 var _danger: PointLight2D
 var _baton_light: PointLight2D
 var _beam: Node2D
+var _mat: ShaderMaterial
+var _impact := 0.0
 
 
 func _ready() -> void:
@@ -57,15 +59,20 @@ func _ready() -> void:
 	_beam.draw.connect(_draw_beam)
 	add_child(_beam)
 
+	_mat = ShaderMaterial.new()
+	_mat.shader = preload("res://shaders/character.gdshader")
+	_mat.set_shader_parameter("body_height", 100.0)
+	material = _mat
 
-func take_hit(from: Vector2) -> void:
+
+func take_hit(from: Vector2, damage_taken: float = 1.0, force: float = 280.0) -> void:
 	if _dead:
 		return
-	hp = maxi(0, hp - (2 if _state == "stunned" else 1))
+	hp = maxf(0.0, hp - damage_taken * (2.0 if _state == "stunned" else 1.0))
 	health_changed.emit(hp, MAX_HP)
 	_flash = 0.12
-	_knock = (global_position - from).normalized() * 60.0
-	if hp == 0:
+	_knock = (global_position - from).normalized() * force * 0.2
+	if hp <= 0.0:
 		_die()
 
 
@@ -106,6 +113,19 @@ func _physics_process(delta: float) -> void:
 	_danger.energy = warn * 2.2
 	_spot.color = Color(1.0, 0.9, 0.75).lerp(Color(1.0, 0.3, 0.2), warn)
 	_baton_light.position = Vector2(30 * _facing, -60)
+	# body animation through the vertex shader
+	var lean := 0.0
+	var squash := _impact
+	match _state:
+		"swing_windup": lean = -0.3 * _facing * warn; squash = -0.12 * warn
+		"recover": lean = 0.35 * _facing * maxf(0.0, 1.0 - _state_time * 3.0)
+		"charge_windup": squash = 0.22 * warn; lean = -0.15 * signf(_charge_dir.x) * warn
+		"charge": lean = 0.4 * signf(_charge_dir.x)
+	_mat.set_shader_parameter("lean", lean)
+	_mat.set_shader_parameter("squash", squash)
+	_mat.set_shader_parameter("wobble", 1.0 if _state == "stunned" else 0.0)
+	_mat.set_shader_parameter("hit", clampf(_flash * 6.0, 0.0, 1.0))
+	_impact = move_toward(_impact, 0.0, delta * 2.0)
 	_baton_light.energy = 0.35 + randf() * 0.35
 	if _dead:
 		_spot.energy = move_toward(_spot.energy, 0.0, delta)
@@ -134,6 +154,10 @@ func _physics_process(delta: float) -> void:
 				if _floor_distance() < SWING_REACH + 6.0:
 					target.hit(global_position, 2, 360.0)
 				target.shake(4.0, 0.2)
+				_impact = 0.3
+				var root := get_tree().current_scene
+				if root.has_method("shockwave"):
+					root.shockwave(global_position, 6.0, 120.0)
 				_set_state("recover")
 		"charge_windup":
 			if _state_time >= CHARGE_WINDUP:
@@ -163,6 +187,13 @@ func _physics_process(delta: float) -> void:
 		if collider is StaticBody2D:
 			target.shake(6.0, 0.35)
 			_set_state("stunned")
+			_impact = 0.5
+			# the pillar (or wall) he hit buckles, and the floor ripples out from it
+			if collider.has_method("impact"):
+				collider.impact(1.0, signf(_charge_dir.x) * 4.0)
+			var root := get_tree().current_scene
+			if root.has_method("shockwave"):
+				root.shockwave(collider.global_position, 8.0, 200.0)
 
 	_walk = _walk + delta * (16.0 if _state == "charge" else 7.0) if move != Vector2.ZERO else 0.0
 
@@ -181,7 +212,6 @@ func _draw() -> void:
 		draw_line(Vector2.ZERO, lane, Color(1, 0.6, 0.5, alpha), 2.0)
 
 	FX.draw_character_shadow(self, 22.0, 90.0)
-	self_modulate = Color(2.2, 2.2, 2.2) if _flash > 0.0 else Color.WHITE
 
 	# Everything below is drawn at double size: he's huge.
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2(2.0, 2.0))
