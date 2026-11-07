@@ -18,6 +18,7 @@ const MAX_HP := 10
 const INVULNERABLE_TIME := 0.8   # seconds of safety after taking a hit
 const FIRE_COOLDOWN := 0.22
 
+const FX := preload("res://scripts/fx.gd")
 const SUIT := Color("ee7a2b")
 const SUIT_DARK := Color("b85a1c")
 const CASING := Color("5a6272")
@@ -48,15 +49,22 @@ var _muzzle_flash := 0.0
 var _shake_time := 0.0
 var _shake_amount := 0.0
 var _cam: Camera2D
+var _glow: PointLight2D
 
 
 func _ready() -> void:
+	add_to_group("player")
 	# A small circle at the villain's feet is what bumps into walls.
 	var shape := CollisionShape2D.new()
 	var circle := CircleShape2D.new()
 	circle.radius = 7.0
 	shape.shape = circle
 	add_child(shape)
+
+	# The casings' cyan seams glow faintly; the glow fades as they break off.
+	_glow = FX.make_light(Color(0.3, 0.95, 1.0), 0.45, 0.45)
+	_glow.position = Vector2(0, -24)
+	add_child(_glow)
 
 	_cam = Camera2D.new()
 	_cam.zoom = Vector2(1.8, 1.8)
@@ -163,6 +171,8 @@ func _physics_process(delta: float) -> void:
 	_invulnerable = maxf(0.0, _invulnerable - delta)
 	_fire_cooldown = maxf(0.0, _fire_cooldown - delta)
 	_muzzle_flash = maxf(0.0, _muzzle_flash - delta)
+	_glow.energy = 0.12 * broken.count(false) + (0.8 if _muzzle_flash > 0.0 else 0.0)
+	_glow.color = Color(0.75, 0.45, 1.0) if _muzzle_flash > 0.0 else Color(0.3, 0.95, 1.0)
 	queue_redraw()
 	if held:
 		return
@@ -225,11 +235,8 @@ func _draw() -> void:
 		var k := 1.0 - _slam_time / 0.3
 		_iso_ring(Vector2.ZERO, SLAM_RANGE * (0.4 + k), Color(SEAM, 1.0 - k), 3.0)
 
-	# shadow (shrinks while floating)
-	var shadow_scale := 1.0 - hover / HOVER * 0.35
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2(shadow_scale, shadow_scale * 0.45))
-	draw_circle(Vector2.ZERO, 13.0, Color(0, 0, 0, 0.35))
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	# long shadow (shrinks while floating)
+	FX.draw_character_shadow(self, 13.0 * (1.0 - hover / HOVER * 0.35), 46.0)
 
 	if dead:
 		modulate = Color(0.55, 0.55, 0.6)
@@ -271,7 +278,7 @@ func _draw_free() -> void:
 	_leg(o + Vector2(4, 0), -stride, Piece.RIGHT_LEG)
 	_torso(o)
 	for side: int in [-1, 1]:
-		var shoulder := o + Vector2(10 * side, -32)
+		var shoulder := o + Vector2(12 * side, -33)
 		var hand: Vector2
 		if has_rifle and _slam_time <= 0.0:
 			hand = o + Vector2((14 + 4 * side) * facing, -24)  # both hands on the rifle
@@ -280,7 +287,7 @@ func _draw_free() -> void:
 		elif _slam_time > 0.0:
 			hand = o + Vector2(16 * side, -6)        # smashing down
 		else:
-			hand = o + Vector2(13 * side - stride * side * 0.8, -14)
+			hand = o + Vector2(15 * side - stride * side * 0.8, -14)
 		_arm(shoulder, hand, Piece.LEFT_ARM if side < 0 else Piece.RIGHT_ARM)
 	if has_rifle and _slam_time <= 0.0:
 		_draw_rifle(o)
@@ -303,67 +310,135 @@ func _draw_rifle(o: Vector2) -> void:
 
 func _leg(foot: Vector2, stride: float, piece: int) -> void:
 	var hip := foot + Vector2(0, -18)
-	var knee := foot + Vector2(stride, -11)
-	draw_line(hip, knee, SUIT_DARK, 5.0)
+	var knee := foot + Vector2(stride, -10)
+	draw_line(hip, knee, SUIT_DARK, 6.5)
+	draw_line(hip + Vector2(-1, 0), knee + Vector2(-1, 0), SUIT, 3.5)
 	if broken[piece]:
-		draw_line(knee, foot + Vector2(stride * 0.5, 0), SUIT_DARK, 5.0)
-		draw_rect(Rect2(foot + Vector2(stride * 0.5 - 3, -2), Vector2(6, 3)), Color("1c1a20"))
+		# torn trouser leg, bare shin, and the broken ankle cuff with dangling wires
+		var ankle := foot + Vector2(stride * 0.5, -3)
+		draw_line(knee, ankle, SUIT_DARK, 5.5)
+		_torn_edge(knee + Vector2(-3.5, 1), knee + Vector2(3.5, 1))
+		draw_line(knee + Vector2(0, 2), ankle, SKIN.darkened(0.2), 3.0)
+		_cuff_remnant(ankle, 6.0, piece)
+		draw_rect(Rect2(foot + Vector2(stride * 0.5 - 3.5, -2), Vector2(7, 3)), Color("141318"))
 		return
-	var shin := Rect2(knee + Vector2(-5, -1), Vector2(10, 13))
+	var shin := Rect2(knee + Vector2(-5.5, -1), Vector2(11, 13))
 	draw_rect(shin.grow(1), CASING_DARK)
-	draw_rect(shin, CASING)
-	draw_line(shin.position + Vector2(0, 5), shin.position + Vector2(10, 5), SEAM, 1.5)
+	FX.gradient_quad(self, PackedVector2Array([shin.position, shin.position + Vector2(shin.size.x, 0), shin.end, shin.position + Vector2(0, shin.size.y)]), CASING_LIGHT, CASING_DARK)
+	draw_line(shin.position + Vector2(0, 5), shin.position + Vector2(11, 5), SEAM, 1.5)
+	draw_line(shin.position + Vector2(5.5, 6), shin.position + Vector2(5.5, 13), Color(0, 0, 0, 0.35), 1.0)
+	draw_circle(shin.position + Vector2(2, 2), 0.8, CASING_LIGHT.lightened(0.3))
+	draw_circle(shin.position + Vector2(9, 2), 0.8, CASING_LIGHT.lightened(0.3))
 
 
 func _arm(shoulder: Vector2, hand: Vector2, piece: int) -> void:
 	if broken[piece]:
-		# bare arm: orange sleeve, grey fist, a jagged stub of casing at the shoulder
-		draw_line(shoulder, hand, SUIT_DARK, 6.0)
-		draw_line(shoulder, hand, SUIT, 4.0)
-		draw_circle(hand, 3.5, SKIN)
-		draw_circle(shoulder, 4.0, CASING_DARK)
+		# torn sleeve to the elbow, bare muscular forearm, cuff remnant at the wrist
+		var elbow := shoulder.lerp(hand, 0.45)
+		draw_line(shoulder, elbow, SUIT_DARK, 7.5)
+		draw_line(shoulder, elbow, SUIT, 5.0)
+		_torn_edge(elbow + (hand - shoulder).orthogonal().normalized() * 3.5, elbow - (hand - shoulder).orthogonal().normalized() * 3.5)
+		draw_line(elbow, hand, SKIN.darkened(0.25), 5.5)
+		draw_line(elbow, hand, SKIN, 3.5)
+		draw_line(elbow.lerp(hand, 0.2), elbow.lerp(hand, 0.7), SKIN.lightened(0.2), 1.0)  # muscle highlight
+		_cuff_remnant(elbow.lerp(hand, 0.8), 7.0, piece)
+		draw_circle(hand, 3.8, SKIN.darkened(0.1))
+		draw_circle(shoulder, 4.5, CASING_DARK)  # jagged stump of the shoulder mount
 		return
-	_casing(shoulder, hand, 12.0)
+	_casing(shoulder, hand, 13.0)
+
+
+## A ragged fabric edge where the jumpsuit has been torn.
+func _torn_edge(a: Vector2, b: Vector2) -> void:
+	var pts := PackedVector2Array()
+	for i in 6:
+		var p := a.lerp(b, i / 5.0)
+		pts.append(p + Vector2(0, 2.0 if i % 2 == 0 else -0.5))
+	draw_polyline(pts, SUIT_DARK.darkened(0.3), 1.5)
+
+
+## What's left of a casing once it breaks: a jagged steel band with torn-out wires.
+func _cuff_remnant(at: Vector2, radius: float, piece: int) -> void:
+	var band := PackedVector2Array()
+	for i in 10:
+		var a := TAU * i / 10.0
+		var r := radius + (1.2 if i % 3 == 0 else 0.0)
+		band.append(at + Vector2(cos(a) * r, sin(a) * r * 0.45))
+	draw_colored_polygon(band, CASING_DARK)
+	draw_polyline(band, CASING_LIGHT, 1.0)
+	# broken teeth sticking out
+	for k in 3:
+		var a := TAU * (k + 0.3 * piece) / 3.0
+		var base := at + Vector2(cos(a) * radius, sin(a) * radius * 0.45)
+		draw_line(base, base + Vector2(cos(a) * 3.0, -2.5), CASING_LIGHT, 1.2)
+	# dangling wires swinging as he moves
+	var sway := sin(_t * 3.0 + piece) * 2.0 + sin(walk_time) * 1.5
+	var colors := [Color("c23b2e"), Color("2f7fd1"), Color("d9c23a")]
+	for k in 3:
+		var start := at + Vector2(-2.5 + k * 2.5, 1.5)
+		var end := start + Vector2(sway + k - 1, 7.0 + k * 2.0)
+		draw_polyline(PackedVector2Array([start, start.lerp(end, 0.5) + Vector2(1.5, 0), end]), colors[k], 0.9)
+	# the odd spark from a severed seam
+	if fmod(_t * 2.0 + piece * 1.3, 3.0) < 0.1:
+		draw_circle(at + Vector2(sway, 9), 2.5, Color(0.6, 1.0, 1.0, 0.9))
 
 
 func _torso(o: Vector2) -> void:
-	draw_colored_polygon(PackedVector2Array([
-		o + Vector2(-11, -35), o + Vector2(11, -35), o + Vector2(7, -16), o + Vector2(-7, -16)
-	]), SUIT)
-	draw_line(o + Vector2(0, -34), o + Vector2(0, -17), SUIT_DARK, 1.0)
-	draw_rect(Rect2(o + Vector2(-8, -31), Vector2(6, 4)), Color("f5efe0"))  # prisoner number
-	draw_rect(Rect2(o + Vector2(-8, -19), Vector2(16, 4)), CASING_DARK)     # restraint belt
+	# broad, hunched shoulders tapering to the waist
+	FX.gradient_quad(self, PackedVector2Array([
+		o + Vector2(-13, -36), o + Vector2(13, -36), o + Vector2(7.5, -15), o + Vector2(-7.5, -15)
+	]), SUIT.lightened(0.08), SUIT_DARK)
+	draw_line(o + Vector2(0, -35), o + Vector2(0, -16), SUIT_DARK.darkened(0.2), 1.0)  # zip
+	for fold in [[Vector2(-9, -27), Vector2(-5, -24)], [Vector2(5, -22), Vector2(8, -19)]]:
+		draw_line(o + fold[0], o + fold[1], Color(0, 0, 0, 0.3), 0.8)
+	# a rip in the suit across the ribs
+	draw_polyline(PackedVector2Array([o + Vector2(3, -30), o + Vector2(5, -28.5), o + Vector2(7, -30), o + Vector2(9, -28)]), SKIN.darkened(0.3), 1.4)
+	draw_rect(Rect2(o + Vector2(-9, -32), Vector2(7, 4)), Color("efe8d6"))  # prisoner number
+	draw_line(o + Vector2(-8, -30), o + Vector2(-3.5, -30), Color(0, 0, 0, 0.6), 0.8)
+	draw_rect(Rect2(o + Vector2(-8.5, -19), Vector2(17, 4)), CASING_DARK)  # restraint belt
 	draw_rect(Rect2(o + Vector2(-2, -19), Vector2(4, 4)), SEAM)
 
 
 ## A heavy mechanical sleeve from a to b, with a big cuff block at the end.
 func _casing(a: Vector2, b: Vector2, thickness: float) -> void:
+	var n := (b - a).orthogonal().normalized() * thickness * 0.5
 	draw_line(a, b, CASING_DARK, thickness + 2.0)
-	draw_line(a, b, CASING, thickness)
-	draw_line(a + Vector2(0, -thickness * 0.3), b + Vector2(0, -thickness * 0.3), CASING_LIGHT, 1.5)
-	for t in [0.35, 0.7]:
+	draw_polygon(PackedVector2Array([a - n, b - n, b + n, a + n]),
+		PackedColorArray([CASING_LIGHT, CASING_LIGHT, CASING_DARK, CASING_DARK]))
+	draw_line(a - n * 0.7, b - n * 0.7, CASING_LIGHT.lightened(0.25), 1.0)
+	for t in [0.33, 0.66]:
 		var p: Vector2 = a.lerp(b, t)
-		var n := (b - a).orthogonal().normalized() * thickness * 0.5
 		draw_line(p - n, p + n, SEAM, 1.5)
-	var cuff := Rect2(b - Vector2(7, 7), Vector2(14, 14))
+		draw_circle(p - n * 0.6 + (b - a).normalized() * 2.5, 0.8, CASING_LIGHT.lightened(0.3))
+	var cuff := Rect2(b - Vector2(7.5, 7.5), Vector2(15, 15))
 	draw_rect(cuff.grow(1), CASING_DARK)
-	draw_rect(cuff, CASING)
-	draw_circle(b, 2.0, SEAM)
+	FX.gradient_quad(self, PackedVector2Array([cuff.position, cuff.position + Vector2(cuff.size.x, 0), cuff.end, cuff.position + Vector2(0, cuff.size.y)]), CASING_LIGHT, CASING_DARK)
+	draw_rect(Rect2(cuff.position + Vector2(2, 2), Vector2(11, 2)), Color(0, 0, 0, 0.3))
+	draw_circle(b, 2.2, SEAM)
+	draw_circle(b, 4.0, Color(SEAM, 0.25))
 
 
 func _head(o: Vector2, f: float) -> void:
-	draw_rect(Rect2(o + Vector2(-7, -39), Vector2(14, 5)), CASING_DARK)  # restraint collar
-	draw_rect(Rect2(o + Vector2(-6, -38), Vector2(12, 3)), CASING)
-	draw_circle(o + Vector2(0, -36.5), 1.2, SEAM)
-	var head := o + Vector2(0, -45)
-	draw_circle(head, 7.0, SKIN)
+	# restraint collar
+	draw_rect(Rect2(o + Vector2(-7.5, -40), Vector2(15, 5)), CASING_DARK)
+	draw_rect(Rect2(o + Vector2(-6.5, -39), Vector2(13, 2)), CASING_LIGHT)
+	draw_circle(o + Vector2(0, -37.5), 1.3, SEAM)
+	var head := o + Vector2(0, -46)
+	draw_circle(head, 7.2, SKIN.darkened(0.15))
+	draw_circle(head + Vector2(-0.6, -0.6), 6.4, SKIN)
+	draw_line(head + Vector2(-5, 4), head + Vector2(5, 4), SKIN.darkened(0.3), 1.0)  # hard jaw line
+	# slick black hair with a widow's peak
 	draw_colored_polygon(PackedVector2Array([
-		head + Vector2(-7, -1), head + Vector2(-6, -6), head + Vector2(0, -8),
-		head + Vector2(6, -6), head + Vector2(7, -1), head + Vector2(0, -3)
-	]), Color("16141c"))
+		head + Vector2(-7.4, -1), head + Vector2(-6.5, -6.5), head + Vector2(0, -8.5),
+		head + Vector2(6.5, -6.5), head + Vector2(7.4, -1), head + Vector2(0, -3.5)
+	]), Color("131118"))
+	draw_line(head + Vector2(-4, -6.5), head + Vector2(1, -7.5), Color(1, 1, 1, 0.18), 0.8)
+	# glowing eyes under a heavy brow
 	var ex := 2.5 * f
-	draw_circle(head + Vector2(ex - 2.0, 1), 1.3, Color("ffd23f"))
-	draw_circle(head + Vector2(ex + 2.0, 1), 1.3, Color("ffd23f"))
+	draw_line(head + Vector2(ex - 4, -0.8), head + Vector2(ex + 4, -0.8), SKIN.darkened(0.45), 1.2)
+	for dx in [-2.0, 2.0]:
+		draw_circle(head + Vector2(ex + dx, 1), 2.4, Color(1.0, 0.82, 0.25, 0.25))
+		draw_circle(head + Vector2(ex + dx, 1), 1.3, Color("ffd23f"))
 
 
 func _iso_ring(c: Vector2, r: float, color: Color, width: float) -> void:

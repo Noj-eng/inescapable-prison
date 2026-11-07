@@ -12,6 +12,7 @@ extends Node2D
 ##   E  the lift to the next level (unlocks when the level is clear)
 ##   G  a guard comes in here     M  a security robot comes in here
 ##   C  Captain Brask, the first boss
+##   v  a steam vent in the floor
 ##
 ## Edit a map, press Play, and the level rebuilds itself.
 
@@ -21,14 +22,15 @@ const TILE_H := 32.0  # height of one diamond tile in pixels
 const LEVELS := [
 	{
 		"name": "CELL BLOCK C",
+		"floor": "concrete",
 		"map": [
 			"###############",
 			"#b..#b..#b..#E#",
 			"#...#...#...#G#",
-			"#t..#t..#t..#.#",
+			"#t..#t..#t..#v#",
 			"#BBB#B.B#BBB#.#",
 			"#.............#",
-			"#.....R.......#",
+			"#.....R...v...#",
 			"#..d.....d....#",
 			"#G...........M#",
 			"###############",
@@ -36,11 +38,12 @@ const LEVELS := [
 	},
 	{
 		"name": "LEVEL 2:  MESS HALL",
+		"floor": "concrete",
 		"map": [
 			"###############",
 			"#P............#",
 			"#.dd..dd..dd.G#",
-			"#.............#",
+			"#......v......#",
 			"#.dd..dd..dd..#",
 			"#M............#",
 			"#.dd..dd..dd..#",
@@ -51,12 +54,13 @@ const LEVELS := [
 	},
 	{
 		"name": "LEVEL 3:  SECURITY WING",
+		"floor": "steel",
 		"map": [
 			"###############",
 			"#P....x...x...#",
 			"#..o.....o..M.#",
 			"#.....xx......#",
-			"#M.........c..#",
+			"#M....v....c..#",
 			"#..o..c..o....#",
 			"#.....xx....G.#",
 			"#.G...........#",
@@ -66,16 +70,17 @@ const LEVELS := [
 	},
 	{
 		"name": "LEVEL 4:  THE CAPTAIN'S YARD",
+		"floor": "mixed",
 		"map": [
 			"#################",
 			"#P..............#",
 			"#...............#",
 			"#..o.........o..#",
-			"#...............#",
+			"#.......v.......#",
 			"#.........C.....#",
 			"#...............#",
 			"#..o.........o..#",
-			"#...............#",
+			"#.......v.......#",
 			"#...............#",
 			"#################",
 		],
@@ -90,12 +95,17 @@ const EnemyScript := preload("res://scripts/enemy.gd")
 const BossScript := preload("res://scripts/boss.gd")
 const LiftScript := preload("res://scripts/lift.gd")
 const RiflePickupScript := preload("res://scripts/rifle_pickup.gd")
+const AtmosphereScript := preload("res://scripts/atmosphere.gd")
+const NeonBarScript := preload("res://scripts/neon_bar.gd")
+const ChromaLabelScript := preload("res://scripts/chroma_label.gd")
+const SCANLINES := preload("res://shaders/scanlines.gdshader")
 
 var level_index := 0
 var world: Node2D
 var floor_node: Node2D
 var rig: StaticBody2D
 var lift: Node2D
+var atmosphere: Node2D
 var player: CharacterBody2D
 var spawns: Array = []          # [kind, screen position] for each enemy entrance
 var enemies_left := 0
@@ -104,12 +114,12 @@ var casings_at_level_start: Array = []
 var _level_token := 0           # changes on every level load, so old timers know to stop
 
 var hud: CanvasLayer
-var title_label: Label
-var message: Label
-var restraint_pips: Array[ColorRect] = []
-var health_fill: ColorRect
+var title_label: Control
+var message: Control
+var restraint_pips: Array = []
+var health_bar: Control
 var boss_bar: Control
-var boss_fill: ColorRect
+var boss_meter: Control
 var alarm: ColorRect
 var fade: ColorRect
 var game_over_panel: Control
@@ -121,6 +131,11 @@ static func grid_to_screen(cell: Vector2) -> Vector2:
 
 
 func _ready() -> void:
+	# Darken the whole world so the lamps, beacons and glows do the lighting.
+	var dark := CanvasModulate.new()
+	dark.color = Color(0.36, 0.38, 0.47)
+	add_child(dark)
+
 	player = CharacterBody2D.new()
 	player.set_script(PlayerScript)
 	player.name = "Villain"
@@ -153,6 +168,8 @@ func _load_level(index: int) -> void:
 		world.queue_free()
 	if floor_node:
 		floor_node.queue_free()
+	if atmosphere:
+		atmosphere.queue_free()
 
 	var level: Dictionary = LEVELS[index]
 	var map: Array = level["map"]
@@ -163,6 +180,7 @@ func _load_level(index: int) -> void:
 	floor_node = Node2D.new()
 	floor_node.set_script(FloorScript)
 	floor_node.z_index = -10
+	floor_node.theme = level.get("floor", "concrete")
 	add_child(floor_node)
 
 	# Everything that stands up goes in a Y-sorted world, so things lower on
@@ -176,6 +194,9 @@ func _load_level(index: int) -> void:
 	var boss_at := Vector2.ZERO
 	var has_boss := false
 	var lift_at := Vector2.INF
+	var vents: Array = []
+	var lamps: Array = []
+	var bounds := Rect2(grid_to_screen(Vector2(0, 0)), Vector2.ZERO)
 	for y in rows:
 		for x in cols:
 			var ch: String = map[y][x]
@@ -183,6 +204,9 @@ func _load_level(index: int) -> void:
 			var at := grid_to_screen(cell)
 			if ch != "#":
 				floor_cells.append(cell)
+				bounds = bounds.expand(at)
+				if x % 5 == 2 and y % 4 == 2:
+					lamps.append(at)
 			match ch:
 				"#":
 					# Back walls stand tall, inner walls are half height, and walls on
@@ -204,7 +228,16 @@ func _load_level(index: int) -> void:
 					boss_at = at
 					has_boss = true
 				"E": lift_at = at
+				"v":
+					floor_node.vents.append(cell)
+					vents.append(at)
 	floor_node.cells = floor_cells
+
+	atmosphere = Node2D.new()
+	atmosphere.set_script(AtmosphereScript)
+	add_child(atmosphere)
+	var beacons := [grid_to_screen(Vector2(1, 1)) + Vector2(0, -60), grid_to_screen(Vector2(cols - 2, rows - 2)) + Vector2(0, -20)]
+	atmosphere.setup(bounds, lamps, vents, beacons, index > 0)
 
 	if lift_at != Vector2.INF:
 		# The lift lives on the floor layer, so it is cleared away with the level.
@@ -245,8 +278,10 @@ func _add_block(kind: String, at: Vector2) -> void:
 	var block := StaticBody2D.new()
 	block.set_script(BlockScript)
 	block.kind = kind
+	block.seed_value = hash(at)
 	block.position = at
 	world.add_child(block)
+	floor_node.add_shadow(block.shadow_polygon())
 
 
 # --- Level scripts ----------------------------------------------------------------
@@ -296,7 +331,7 @@ func _run_boss_intro(at: Vector2) -> void:
 	world.add_child(boss)
 	boss.health_changed.connect(_on_boss_health_changed)
 	boss.defeated.connect(_on_boss_defeated)
-	boss_fill.size.x = 496
+	boss_meter.value = 1.0
 	boss_bar.visible = true
 	_say("CAPTAIN BRASK:  \"Back in the rig, inmate.\"\n(Lure his charge into a pillar to stun him.)", Color("ff8a5a"), 3.5)
 
@@ -341,7 +376,7 @@ func _on_lift_entered() -> void:
 
 
 func _on_boss_health_changed(hp: int, max_hp: int) -> void:
-	boss_fill.size.x = 496.0 * hp / max_hp
+	boss_meter.value = float(hp) / max_hp
 
 
 func _on_boss_defeated(at: Vector2) -> void:
@@ -363,12 +398,12 @@ func _on_rifle_picked_up() -> void:
 
 
 func _on_casing_broken(piece: int) -> void:
-	restraint_pips[piece].color = Color("2a2f3a")
+	restraint_pips[piece].value = 0.0
 	_say("CASING CRACKED", Color("5ff3ff"), 1.0)
 
 
 func _on_health_changed(hp: int, max_hp: int) -> void:
-	health_fill.size.x = 196.0 * hp / max_hp
+	health_bar.value = float(hp) / max_hp
 
 
 func _on_player_died() -> void:
@@ -382,19 +417,26 @@ func _retry() -> void:
 	game_over_panel.visible = false
 	player.revive(player.MAX_HP, casings_at_level_start)
 	for i in 4:
-		restraint_pips[i].color = Color("2a2f3a") if player.broken[i] else Color("5ff3ff")
+		restraint_pips[i].value = 0.0 if player.broken[i] else 1.0
 	_on_health_changed(player.hp, player.MAX_HP)
 	_load_level(level_index)
 
 
 func _start_alarm() -> void:
+	atmosphere.set_alarm(true)
 	alarm.visible = true
 	var tween := create_tween().set_loops()
-	tween.tween_property(alarm, "color:a", 0.12, 0.6)
+	tween.tween_property(alarm, "color:a", 0.06, 0.6)
 	tween.tween_property(alarm, "color:a", 0.0, 0.6)
 
 
 # --- HUD ------------------------------------------------------------------------
+## A sleek monitor-style HUD: thin segmented neon meters, monospace text with a
+## slight colour split, and faint scanlines over the whole screen.
+
+const HUD_DIM := Color(0.62, 0.7, 0.82, 0.75)
+const NEON_CYAN := Color("4ff0ff")
+
 
 func _build_hud() -> void:
 	hud = CanvasLayer.new()
@@ -407,62 +449,36 @@ func _build_hud() -> void:
 	alarm.visible = false
 	hud.add_child(alarm)
 
-	title_label = _label("", Vector2(24, 18), 22, Color("ffd23f"))
-	_label("Move: WASD or arrow keys     Slam: Space", Vector2(24, 50), 14, Color(0.75, 0.78, 0.85, 0.8))
+	title_label = _chroma("", Vector2(28, 20), Vector2(600, 30), 20, Color("ffd23f"))
+	_chroma("MOVE [WASD]   SLAM [SPACE]   FIRE [CLICK/F]", Vector2(28, 48), Vector2(600, 20), 12, HUD_DIM)
 
-	# Health bar
-	_label("HEALTH", Vector2(24, 76), 12, Color(0.75, 0.78, 0.85, 0.8))
-	var health_back := ColorRect.new()
-	health_back.color = Color("1a1d24")
-	health_back.position = Vector2(24, 96)
-	health_back.size = Vector2(200, 14)
-	hud.add_child(health_back)
-	health_fill = ColorRect.new()
-	health_fill.color = Color("e8574a")
-	health_fill.position = Vector2(26, 98)
-	health_fill.size = Vector2(196, 10)
-	hud.add_child(health_fill)
+	# Health meter
+	_chroma("VITALS", Vector2(28, 76), Vector2(200, 16), 11, HUD_DIM)
+	health_bar = _neon_bar(Vector2(28, 94), Vector2(220, 16), Color("ff3d6e"), 20)
 
-	# Restraint gauge: one pip per casing, cyan while it's still locked on.
-	_label("RESTRAINTS", Vector2(1080, 18), 14, Color(0.75, 0.78, 0.85, 0.8))
-	var names := ["L ARM", "R ARM", "L LEG", "R LEG"]
+	# Restraint gauge: one segment per casing, lit while it's still locked on.
+	_chroma("RESTRAINTS", Vector2(1068, 20), Vector2(190, 16), 11, HUD_DIM)
+	var names := ["L.ARM", "R.ARM", "L.LEG", "R.LEG"]
 	for i in 4:
-		var pip := ColorRect.new()
-		pip.color = Color("5ff3ff")
-		pip.position = Vector2(1080 + i * 44, 40)
-		pip.size = Vector2(38, 10)
-		hud.add_child(pip)
+		var pip := _neon_bar(Vector2(1068 + i * 48, 40), Vector2(44, 14), NEON_CYAN, 1)
 		restraint_pips.append(pip)
-		_label(names[i], Vector2(1080 + i * 44, 52), 10, Color(0.75, 0.78, 0.85, 0.7))
+		_chroma(names[i], Vector2(1068 + i * 48, 56), Vector2(44, 14), 10, HUD_DIM)
 
-	# Boss bar, top centre, hidden until the captain shows up.
+	# Boss meter, top centre, hidden until the captain shows up.
 	boss_bar = Control.new()
-	boss_bar.position = Vector2(390, 22)
+	boss_bar.position = Vector2(390, 18)
+	boss_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hud.add_child(boss_bar)
-	var boss_name := Label.new()
-	boss_name.text = "CAPTAIN BRASK"
-	boss_name.size = Vector2(500, 20)
-	boss_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	boss_name.add_theme_font_size_override("font_size", 16)
-	boss_name.add_theme_color_override("font_color", Color("ff8a5a"))
-	boss_bar.add_child(boss_name)
-	var boss_back := ColorRect.new()
-	boss_back.color = Color("1a1d24")
-	boss_back.position = Vector2(0, 26)
-	boss_back.size = Vector2(500, 14)
-	boss_bar.add_child(boss_back)
-	boss_fill = ColorRect.new()
-	boss_fill.color = Color("d93a3a")
-	boss_fill.position = Vector2(2, 28)
-	boss_fill.size = Vector2(496, 10)
-	boss_bar.add_child(boss_fill)
+	var boss_name := _chroma("// CAPTAIN BRASK //", Vector2.ZERO, Vector2(500, 20), 15, Color("ff7a4a"), boss_bar)
+	boss_name.align = HORIZONTAL_ALIGNMENT_CENTER
+	for l in boss_name.get_children():
+		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	boss_meter = _neon_bar(Vector2(0, 24), Vector2(500, 14), Color("ff5a2e"), 40, boss_bar)
 	boss_bar.visible = false
 
-	message = _label("", Vector2(0, 580), 20, Color.WHITE)
-	message.size = Vector2(1280, 80)
-	message.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	message.add_theme_color_override("font_outline_color", Color(0, 0, 0))
-	message.add_theme_constant_override("outline_size", 6)
+	message = _chroma("", Vector2(0, 570), Vector2(1280, 90), 20, Color.WHITE)
+	for l in message.get_children():
+		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 
 	# Black fade used between levels
 	fade = ColorRect.new()
@@ -473,36 +489,52 @@ func _build_hud() -> void:
 
 	# Game over screen
 	game_over_panel = ColorRect.new()
-	game_over_panel.color = Color(0.03, 0.02, 0.04, 0.8)
+	game_over_panel.color = Color(0.03, 0.01, 0.03, 0.82)
 	game_over_panel.size = Vector2(1280, 720)
 	game_over_panel.visible = false
 	hud.add_child(game_over_panel)
-	var big := Label.new()
-	big.text = "CONTAINED"
-	big.position = Vector2(0, 270)
-	big.size = Vector2(1280, 80)
-	big.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	big.add_theme_font_size_override("font_size", 64)
-	big.add_theme_color_override("font_color", Color("ff4a4a"))
-	game_over_panel.add_child(big)
-	var hint := Label.new()
-	hint.text = "Press R to try this level again"
-	hint.position = Vector2(0, 360)
-	hint.size = Vector2(1280, 30)
-	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	hint.add_theme_font_size_override("font_size", 18)
-	hint.add_theme_color_override("font_color", Color(0.85, 0.85, 0.9))
-	game_over_panel.add_child(hint)
+	var big := _chroma("CONTAINED", Vector2(0, 270), Vector2(1280, 80), 64, Color("ff3d5a"), game_over_panel)
+	for l in big.get_children():
+		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	var hint := _chroma("> PRESS R TO RETRY THIS LEVEL_", Vector2(0, 360), Vector2(1280, 30), 18, HUD_DIM, game_over_panel)
+	for l in hint.get_children():
+		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+
+	# Scanlines and vignette over everything (its own layer, on top).
+	var crt_layer := CanvasLayer.new()
+	crt_layer.layer = 10
+	add_child(crt_layer)
+	var crt := ColorRect.new()
+	crt.size = Vector2(1280, 720)
+	crt.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var m := ShaderMaterial.new()
+	m.shader = SCANLINES
+	crt.material = m
+	crt_layer.add_child(crt)
 
 
-func _label(text: String, pos: Vector2, font_size: int, color: Color) -> Label:
-	var label := Label.new()
-	label.text = text
+func _chroma(text: String, pos: Vector2, box: Vector2, font_size: int, color: Color, parent: Node = null) -> Control:
+	var label := Control.new()
+	label.set_script(ChromaLabelScript)
 	label.position = pos
-	label.add_theme_font_size_override("font_size", font_size)
-	label.add_theme_color_override("font_color", color)
-	hud.add_child(label)
+	label.size = box
+	label.font_size = font_size
+	label.color = color
+	label.text = text
+	(parent if parent else hud).add_child(label)
 	return label
+
+
+func _neon_bar(pos: Vector2, box: Vector2, color: Color, segments: int, parent: Node = null) -> Control:
+	var bar := Control.new()
+	bar.set_script(NeonBarScript)
+	bar.position = pos
+	bar.size = box
+	bar.color = color
+	bar.segments = segments
+	bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	(parent if parent else hud).add_child(bar)
+	return bar
 
 
 var _message_tween: Tween
@@ -512,7 +544,7 @@ func _say(text: String, color: Color, seconds: float) -> void:
 	if _message_tween:
 		_message_tween.kill()
 	message.text = text
-	message.add_theme_color_override("font_color", color)
+	message.color = color
 	message.modulate.a = 1.0
 	_message_tween = create_tween()
 	_message_tween.tween_interval(seconds)

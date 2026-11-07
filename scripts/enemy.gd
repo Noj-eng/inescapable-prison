@@ -1,4 +1,5 @@
 extends CharacterBody2D
+const FX := preload("res://scripts/fx.gd")
 ## A prison guard or a security robot. Chases the villain and shoves them
 ## on contact. Knock it out with casing slams.
 
@@ -32,6 +33,14 @@ func _ready() -> void:
 	circle.radius = 7.0
 	shape.shape = circle
 	add_child(shape)
+	if kind == "robot":
+		var eye := FX.make_light(Color(1.0, 0.15, 0.1), 0.7, 0.4)
+		eye.position = Vector2(0, -40)
+		add_child(eye)
+	else:
+		var baton := FX.make_light(Color(1.0, 0.8, 0.35), 0.35, 0.25)
+		baton.position = Vector2(18, -28)
+		add_child(baton)
 	# drop in from above
 	modulate.a = 0.0
 	create_tween().tween_property(self, "modulate:a", 1.0, 0.4)
@@ -92,9 +101,7 @@ func _physics_process(delta: float) -> void:
 
 
 func _draw() -> void:
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2(1.0, 0.45))
-	draw_circle(Vector2.ZERO, 11.0, Color(0, 0, 0, 0.35))
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	FX.draw_character_shadow(self, 11.0, 44.0)
 	if _flash > 0.0:
 		self_modulate = Color(3, 3, 3)
 	else:

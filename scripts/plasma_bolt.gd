@@ -10,6 +10,12 @@ var direction := Vector2.RIGHT
 var _age := 0.0
 
 
+func _ready() -> void:
+	var light := preload("res://scripts/fx.gd").make_light(Color(0.75, 0.4, 1.0), 1.0, 0.35)
+	light.position = Vector2(0, -HEIGHT)
+	add_child(light)
+
+
 func _physics_process(delta: float) -> void:
 	_age += delta
 	var flat_dir := Vector2(direction.x, direction.y * 0.5).normalized() if absf(direction.y) > 0.01 else direction

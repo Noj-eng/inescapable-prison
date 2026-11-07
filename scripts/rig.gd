@@ -19,7 +19,13 @@ var _arc_timer := 0.0
 var _arc_seed := 0
 
 
+var _light: PointLight2D
+
+
 func _ready() -> void:
+	_light = preload("res://scripts/fx.gd").make_light(Color(0.35, 0.95, 1.0), 0.55, 0.9)
+	_light.position = RING_CENTER
+	add_child(_light)
 	# The two side pillars are solid. The middle stays open so the villain can step out.
 	for side: int in [-1, 1]:
 		var shape := CollisionShape2D.new()
@@ -34,11 +40,14 @@ func _ready() -> void:
 func fail() -> void:
 	powered = false
 	_sparking = 1.6
+	_light.color = Color(1.0, 0.9, 0.6)
 
 
 func _process(delta: float) -> void:
 	_t += delta
 	_sparking = maxf(0.0, _sparking - delta)
+	if not powered:
+		_light.energy = (randf() * 1.6) if _sparking > 0.0 else move_toward(_light.energy, 0.0, delta)
 	_arc_timer -= delta
 	if _arc_timer <= 0.0:
 		_arc_timer = 0.06

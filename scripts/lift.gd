@@ -8,10 +8,18 @@ var player: Node2D
 var unlocked := false
 var _t := 0.0
 var _used := false
+var _light: PointLight2D
+
+
+func _ready() -> void:
+	_light = preload("res://scripts/fx.gd").make_light(Color(1.0, 0.25, 0.25), 0.8, 0.5)
+	_light.position = Vector2(0, -10)
+	add_child(_light)
 
 
 func _process(delta: float) -> void:
 	_t += delta
+	_light.color = Color(0.3, 1.0, 0.5) if unlocked else Color(1.0, 0.25, 0.25)
 	queue_redraw()
 	if unlocked and not _used and is_instance_valid(player) and not player.dead:
 		var d := player.global_position - global_position
