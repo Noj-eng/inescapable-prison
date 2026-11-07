@@ -1,11 +1,23 @@
 extends CharacterBody3D
-## A prison guard (or a security drone) in 3D. Waits until Victor comes
-## close, then walks around walls to reach him and shoves on contact.
+## A prison guard, or a one-wheeled Detention Unit robot, in 3D. Waits until
+## Victor comes close, then moves around walls to reach him. Guards shove on
+## contact; the robot rolls in, raises its stun baton and brings it down.
+##
+## The robot uses Jon's Meshy model at res://models/wheel_unit.glb when it is
+## there. Only its spine and arm bones are used: the "legs" of its rig sit on
+## either side of the wheel and are never animated. The whole body rolls and
+## leans in code, and glowing hubs on the wheel spin to show it turning.
 
 signal defeated(at: Vector3)
 
 const Look := preload("res://scripts/3d/look_3d.gd")
 const WAKE_DISTANCE := 10.0
+const ROBOT_MODEL := "res://models/wheel_unit.glb"
+const ROBOT_HEIGHT := 2.5          # metres: a head taller than Victor
+const SWING_RANGE := 1.5
+const SWING_WINDUP := 0.55
+const SWING_STRIKE := 0.12
+const SWING_RECOVER := 0.5
 
 var kind := "guard"   # "guard" or "robot"
 var target: Node3D
@@ -24,6 +36,29 @@ var _mats: Array[StandardMaterial3D] = []
 var _waypoint := Vector3.INF
 var _repath := 0.0
 
+# robot parts
+var _wheel_r := 0.45               # wheel radius, metres
+var _wheel_y := 0.45               # wheel centre height
+var _wheel_spin := 0.0
+var _hubs: Array[Node3D] = []
+var _lean := 0.0
+var _baton: Node3D
+var _baton_tip: MeshInstance3D
+var _baton_mat: StandardMaterial3D
+var _baton_light: OmniLight3D
+var _swing := -1.0                 # seconds into the current swing; < 0 = not swinging
+var _swing_hit := false
+var _arm_raise := 0.0              # 0 = arm hanging, 1 = baton overhead
+# stand-in arm pivots
+var _shoulder_r: Node3D
+var _elbow_r: Node3D
+var _shoulder_l: Node3D
+# Meshy model bones
+var _model: Node3D
+var _skel: Skeleton3D
+var _bones := {}                   # "arm_r", "fore_r", "hand_r", "arm_l", "spine" -> bone index
+var _flash_overlay: StandardMaterial3D
+
 
 func _ready() -> void:
 	add_to_group("enemies")
@@ -38,8 +73,15 @@ func _ready() -> void:
 	add_child(_body)
 	if kind == "robot":
 		hp = 4.0
-		speed = 2.2
-		_build_robot()
+		speed = 2.4
+		cap.radius = 0.45
+		cap.height = 2.2
+		shape.position.y = 1.1
+		if ResourceLoader.exists(ROBOT_MODEL):
+			_load_robot_model()
+		else:
+			_build_robot()
+		_build_baton()
 	else:
 		_build_guard()
 
@@ -69,15 +111,283 @@ func _build_guard() -> void:
 
 
 func _build_robot() -> void:
-	var steel := Look.steel(Color("6b7280")).duplicate() as StandardMaterial3D
-	_mats.append(steel)
-	Look.box(_body, Vector3(0.7, 0.75, 0.6), Vector3(0, 1.0, 0), steel)
-	Look.box(_body, Vector3(0.72, 0.08, 0.62), Vector3(0, 1.15, 0), Look.hazard())
-	Look.box(_body, Vector3(0.42, 0.3, 0.38), Vector3(0, 1.55, 0), steel)
-	Look.sphere(_body, 0.07, Vector3(0, 1.56, 0.2), Look.glow(Color("ff2020"), 6.0))
-	Look.sphere(_body, 0.18, Vector3(0, 0.45, 0), Look.glow(Color("ff7a30"), 2.0)).scale = Vector3(1, 0.4, 1)  # thruster
+	# Stand-in for the Detention Unit until wheel_unit.glb is saved.
+	var rust := _mat(Color("6e4a32"))
+	var dark := Look.steel(Color("2a2b2f")).duplicate() as StandardMaterial3D
+	_mats.append(dark)
+	var tyre := _mat(Color("151515"))
+	# the wheel, with a fork either side
+	var wheel := Node3D.new()
+	wheel.position.y = _wheel_y
+	_body.add_child(wheel)
+	var t := Look.cylinder(wheel, _wheel_r, 0.24, Vector3.ZERO, tyre, 20)
+	t.rotation.z = PI / 2
 	for side: int in [-1, 1]:
-		Look.box(_body, Vector3(0.12, 0.5, 0.12), Vector3(0.45 * side, 0.95, 0.1), steel)
+		Look.box(_body, Vector3(0.08, 0.9, 0.3), Vector3(0.2 * side, 0.75, 0), dark)
+	# hips, torso with chest plate, head with red visor
+	Look.box(_body, Vector3(0.55, 0.3, 0.42), Vector3(0, 1.2, 0), dark)
+	Look.box(_body, Vector3(0.8, 0.7, 0.5), Vector3(0, 1.7, 0), rust)
+	Look.box(_body, Vector3(0.5, 0.35, 0.06), Vector3(0, 1.75, 0.26), dark)
+	Look.box(_body, Vector3(0.3, 0.32, 0.3), Vector3(0, 2.25, 0), dark)
+	Look.box(_body, Vector3(0.26, 0.05, 0.04), Vector3(0, 2.28, 0.16), Look.glow(Color("ff2020"), 6.0))
+	# arms on pivots so the baton arm can swing
+	for side: int in [-1, 1]:
+		var shoulder := Node3D.new()
+		shoulder.position = Vector3(0.52 * side, 1.95, 0)
+		_body.add_child(shoulder)
+		var spike := MeshInstance3D.new()
+		var cone := CylinderMesh.new()
+		cone.top_radius = 0.0
+		cone.bottom_radius = 0.2
+		cone.height = 0.4
+		cone.radial_segments = 4
+		spike.mesh = cone
+		spike.material_override = dark
+		spike.position = Vector3(0.08 * side, 0.15, 0)
+		spike.rotation.z = -0.5 * side
+		shoulder.add_child(spike)
+		Look.box(shoulder, Vector3(0.2, 0.45, 0.2), Vector3(0, -0.25, 0), rust)
+		var elbow := Node3D.new()
+		elbow.position.y = -0.5
+		shoulder.add_child(elbow)
+		Look.box(elbow, Vector3(0.26, 0.42, 0.26), Vector3(0, -0.2, 0), rust)
+		Look.box(elbow, Vector3(0.18, 0.16, 0.2), Vector3(0, -0.5, 0), dark)   # fist
+		# model's right hand is on its -X side (it faces +Z)
+		if side == -1:
+			_shoulder_r = shoulder
+			_elbow_r = elbow
+		else:
+			_shoulder_l = shoulder
+	_add_hubs()
+
+
+func _load_robot_model() -> void:
+	var scene: PackedScene = load(ROBOT_MODEL)
+	_model = scene.instantiate()
+	_body.add_child(_model)
+	# never play the rig's own clips: its "legs" are really the wheel
+	for ap in _model.find_children("*", "AnimationPlayer", true, false):
+		(ap as AnimationPlayer).stop()
+		(ap as AnimationPlayer).autoplay = ""
+	var box := _model_aabb(_model)
+	if box.size.y > 0.01:
+		var s := ROBOT_HEIGHT / box.size.y
+		_model.scale = Vector3.ONE * s
+		_model.position.y = -box.position.y * s
+		# the tyre takes up roughly the bottom 45% of the model
+		_wheel_r = ROBOT_HEIGHT * 0.21
+		_wheel_y = _wheel_r
+	_flash_overlay = StandardMaterial3D.new()
+	_flash_overlay.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_flash_overlay.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_flash_overlay.albedo_color = Color(1, 0.95, 0.9, 0.0)
+	for mi in _model.find_children("*", "GeometryInstance3D", true, false):
+		(mi as GeometryInstance3D).material_overlay = _flash_overlay
+		(mi as GeometryInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+	var skels := _model.find_children("*", "Skeleton3D", true, false)
+	if skels.size() > 0:
+		_skel = skels[0]
+		_find_bones()
+		if _bones.has("foot_r") and _bones.has("knee_r"):
+			# Jon put the knee and foot markers on the wheel: use them to find its centre
+			var a := _bone_world(_bones["knee_r"])
+			var b := _bone_world(_bones["foot_r"])
+			var centre := _body.to_local((a + b) * 0.5)
+			if centre.y > 0.2:
+				_wheel_y = centre.y
+				_wheel_r = clampf(centre.y, 0.3, 0.8)
+	_add_hubs()
+
+
+func _model_aabb(n: Node) -> AABB:
+	var box := AABB()
+	var first := true
+	for c in n.find_children("*", "VisualInstance3D", true, false):
+		var vi := c as VisualInstance3D
+		var b: AABB = vi.global_transform * vi.get_aabb() if vi.is_inside_tree() else vi.get_aabb()
+		box = b if first else box.merge(b)
+		first = false
+	# back into this body's local space, unscaled
+	return _body.global_transform.affine_inverse() * box
+
+
+func _bone_named(parts: Array, side: String) -> int:
+	# Finds a bone by keywords, e.g. ["forearm", "lowerarm"] on side "r".
+	# Works with Meshy, Mixamo ("mixamorig:RightForeArm") and "_r"/".R" styles.
+	var best := -1
+	var best_len := 9999
+	for i in _skel.get_bone_count():
+		var n := _skel.get_bone_name(i).to_lower().replace("mixamorig:", "").replace("mixamorig_", "")
+		if side == "r" and not (n.contains("right") or n.ends_with("_r") or n.ends_with(".r") or n.begins_with("r_")):
+			continue
+		if side == "l" and not (n.contains("left") or n.ends_with("_l") or n.ends_with(".l") or n.begins_with("l_")):
+			continue
+		var hit := false
+		for p: String in parts:
+			if n.contains(p):
+				hit = true
+		if not hit:
+			continue
+		if n.contains("finger") or n.contains("thumb") or n.contains("index") or n.contains("twist") or n.contains("end"):
+			continue
+		if n.length() < best_len:
+			best = i
+			best_len = n.length()
+	return best
+
+
+func _find_bones() -> void:
+	for side in ["r", "l"]:
+		var fore := _bone_named(["forearm", "lowerarm", "elbow"], side)
+		var hand := _bone_named(["hand", "wrist"], side)
+		# the upper arm: "arm" but not the forearm/lower arm
+		var arm := -1
+		for i in _skel.get_bone_count():
+			if i == fore or i == hand:
+				continue
+			if _skel.get_bone_children(i).has(fore):
+				arm = i
+		if arm >= 0: _bones["arm_" + side] = arm
+		if fore >= 0: _bones["fore_" + side] = fore
+		if hand >= 0: _bones["hand_" + side] = hand
+		var knee := _bone_named(["leg", "shin", "calf", "knee"], side)
+		var foot := _bone_named(["foot", "ankle"], side)
+		if knee >= 0 and not _skel.get_bone_name(knee).to_lower().contains("up"):
+			_bones["knee_" + side] = knee
+		if foot >= 0: _bones["foot_" + side] = foot
+	var spine := _bone_named(["spine2", "spine02", "spine_02", "chest", "spine1", "spine01", "spine"], "")
+	if spine >= 0: _bones["spine"] = spine
+
+
+func _bone_world(i: int) -> Vector3:
+	return _skel.global_transform * _skel.get_bone_global_pose(i).origin
+
+
+func _add_hubs() -> void:
+	# Glowing hub discs on both faces of the wheel. They spin as it rolls,
+	# which reads as the tyre turning without touching the model.
+	var hub_mat := Look.glow(Color("ff3a1e"), 2.5)
+	var spoke_mat := Look.steel(Color("1c1c1e"))
+	for side: int in [-1, 1]:
+		var hub := Node3D.new()
+		hub.position = Vector3(0.15 * side, _wheel_y, 0)
+		_body.add_child(hub)
+		var ring := MeshInstance3D.new()
+		var torus := TorusMesh.new()
+		torus.inner_radius = _wheel_r * 0.42
+		torus.outer_radius = _wheel_r * 0.5
+		torus.rings = 24
+		ring.mesh = torus
+		ring.material_override = hub_mat
+		ring.rotation.z = PI / 2
+		hub.add_child(ring)
+		for k in 3:
+			var spoke := Look.box(hub, Vector3(0.03, _wheel_r * 0.9, 0.06), Vector3.ZERO, spoke_mat)
+			spoke.rotation.x = k * PI / 3.0
+		_hubs.append(hub)
+
+
+func _build_baton() -> void:
+	_baton = Node3D.new()
+	add_child(_baton)
+	Look.cylinder(_baton, 0.035, 0.25, Vector3(0, 0.12, 0), Look.matte(Color("111111")), 8)   # grip
+	_baton_mat = Look.glow(Color("5ad8ff"), 3.0).duplicate() as StandardMaterial3D
+	_baton_tip = Look.cylinder(_baton, 0.045, 0.6, Vector3(0, 0.55, 0), _baton_mat, 8)
+	_baton_light = OmniLight3D.new()
+	_baton_light.light_color = Color("5ad8ff")
+	_baton_light.light_energy = 0.8
+	_baton_light.omni_range = 2.5
+	_baton_light.position.y = 0.7
+	_baton.add_child(_baton_light)
+
+
+# --- the baton swing -----------------------------------------------------------
+
+func _start_swing() -> void:
+	_swing = 0.0
+	_swing_hit = false
+
+
+func _update_swing(delta: float, to: Vector3) -> void:
+	# Raise (wind-up), crash down (strike), recover. Sets _arm_raise 0..1.
+	if _swing < 0.0:
+		_arm_raise = move_toward(_arm_raise, 0.0, delta * 3.0)
+		return
+	_swing += delta
+	if _swing < SWING_WINDUP:
+		_arm_raise = ease(_swing / SWING_WINDUP, 0.5)
+	elif _swing < SWING_WINDUP + SWING_STRIKE:
+		_arm_raise = 1.0 - (_swing - SWING_WINDUP) / SWING_STRIKE * 1.25
+		if not _swing_hit and _swing > SWING_WINDUP + SWING_STRIKE * 0.6:
+			_swing_hit = true
+			var fwd := Vector3(sin(_body.rotation.y), 0, cos(_body.rotation.y))
+			if to.length() < SWING_RANGE + 0.3 and fwd.dot(to.normalized()) > 0.3:
+				target.hit(global_position, 2, 8.0)
+	elif _swing < SWING_WINDUP + SWING_STRIKE + SWING_RECOVER:
+		_arm_raise = move_toward(_arm_raise, 0.0, delta * 2.0)
+	else:
+		_swing = -1.0
+
+
+func _pose_arms() -> void:
+	# _arm_raise 0 = hanging, 1 = baton overhead, a little below 0 = follow-through
+	var shoulder := lerpf(-0.35, -2.6, _arm_raise)     # radians about the body's right axis
+	var elbow := -0.5 - 0.6 * clampf(_arm_raise, 0.0, 1.0)
+	if _shoulder_r:
+		_shoulder_r.rotation.x = shoulder
+		_elbow_r.rotation.x = elbow
+		_shoulder_l.rotation.x = -0.2 + 0.25 * _arm_raise
+	if _skel:
+		for key in ["arm_r", "fore_r", "spine", "arm_l"]:
+			if _bones.has(key):
+				_skel.reset_bone_pose(_bones[key])
+		_rotate_bone("arm_r", Vector3.RIGHT, shoulder + 0.35)
+		_rotate_bone("fore_r", Vector3.RIGHT, elbow + 0.5)
+		_rotate_bone("arm_l", Vector3.RIGHT, 0.25 * _arm_raise)
+		_rotate_bone("spine", Vector3.UP, 0.25 * _arm_raise)
+		_rotate_bone("spine", Vector3.RIGHT, -0.15 * _arm_raise)
+	_place_baton()
+
+
+func _rotate_bone(key: String, axis_model: Vector3, angle: float) -> void:
+	# Turns a bone about an axis given in the model's own space (+Z forward),
+	# so it works whatever way the rig's bones happen to point.
+	if not _bones.has(key) or absf(angle) < 0.0001:
+		return
+	var i: int = _bones[key]
+	var parent := _skel.get_bone_parent(i)
+	var parent_rot := Quaternion.IDENTITY
+	if parent >= 0:
+		parent_rot = _skel.get_bone_global_pose(parent).basis.get_rotation_quaternion()
+	var turn := Quaternion(axis_model.normalized(), angle)
+	var local := _skel.get_bone_pose_rotation(i)
+	_skel.set_bone_pose_rotation(i, (parent_rot.inverse() * turn * parent_rot) * local)
+
+
+func _place_baton() -> void:
+	# Put the baton in the right fist, pointing on from the forearm.
+	var hand: Vector3
+	var dir: Vector3
+	if _skel and _bones.has("hand_r") and _bones.has("fore_r"):
+		hand = _bone_world(_bones["hand_r"])
+		dir = hand - _bone_world(_bones["fore_r"])
+		hand += dir.normalized() * 0.08
+	elif _elbow_r:
+		hand = _elbow_r.to_global(Vector3(0, -0.5, 0.05))
+		dir = _elbow_r.to_global(Vector3(0, -1, 0)) - _elbow_r.global_position
+	else:
+		return
+	# the baton sticks out forward from the fist, tipping up as the arm rises
+	var fwd := _body.global_basis.z
+	var up_dir := (dir.normalized() * 0.4 + fwd * 0.8 + Vector3.UP * 0.2).normalized()
+	_baton.global_position = hand
+	var side := up_dir.cross(fwd)
+	if side.length() < 0.01:
+		side = _body.global_basis.x
+	_baton.global_basis = Basis(side.normalized(), up_dir, side.normalized().cross(up_dir)).orthonormalized()
+	var charge := clampf(_arm_raise, 0.0, 1.0)
+	_baton_mat.emission_energy_multiplier = 2.5 + 10.0 * charge + randf() * 1.5 * charge
+	_baton_light.light_energy = 0.6 + 3.0 * charge
 
 
 func take_hit(from: Vector3, damage := 1.0, force := 6.0) -> void:
@@ -99,6 +409,9 @@ func _die() -> void:
 	collision_layer = 0
 	collision_mask = 1
 	defeated.emit(global_position)
+	if _baton:
+		_baton.queue_free()
+		_baton = null
 	# topple over backwards, then sink through the floor
 	var tween := create_tween()
 	tween.tween_property(_body, "rotation:x", -PI / 2.0, 0.35).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
@@ -115,6 +428,8 @@ func _physics_process(delta: float) -> void:
 		m.emission_enabled = _flash > 0.0
 		m.emission = Color(1, 0.9, 0.85)
 		m.emission_energy_multiplier = _flash * 20.0
+	if _flash_overlay:
+		_flash_overlay.albedo_color.a = minf(0.85, _flash * 6.0)
 	if not is_on_floor():
 		velocity.y -= 20.0 * delta
 	var move := Vector3.ZERO
@@ -129,13 +444,21 @@ func _physics_process(delta: float) -> void:
 			if _repath <= 0.0 and level.has_method("path_next"):
 				_repath = 0.3
 				_waypoint = level.path_next(global_position, target.global_position)
-			if to.length() > 0.95:
+			var reach := 0.95
+			if kind == "robot":
+				reach = SWING_RANGE * 0.8
+				if _swing < 0.0 and to.length() < SWING_RANGE and _touch_cooldown <= 0.0:
+					_start_swing()
+					_touch_cooldown = SWING_WINDUP + SWING_STRIKE + SWING_RECOVER + 0.4
+			if _swing >= 0.0 and _swing < SWING_WINDUP + SWING_STRIKE:
+				pass   # planted while swinging
+			elif to.length() > reach:
 				var goal := to
 				if _waypoint != Vector3.INF and to.length() > 2.5:
 					goal = _waypoint - global_position
 					goal.y = 0
 				move = goal.normalized() * speed
-			elif _touch_cooldown <= 0.0:
+			elif kind != "robot" and _touch_cooldown <= 0.0:
 				target.hit(global_position, 1)
 				_touch_cooldown = 1.0
 			_body.rotation.y = lerp_angle(_body.rotation.y, atan2(to.x, to.z), minf(1.0, delta * 10.0))
@@ -147,7 +470,26 @@ func _physics_process(delta: float) -> void:
 		return
 	_walk = _walk + delta * 10.0 if move != Vector3.ZERO else 0.0
 	if kind == "robot":
-		_body.position.y = 0.15 + sin(_t * 3.0) * 0.06
+		var to_target := Vector3.ZERO
+		if is_instance_valid(target):
+			to_target = target.global_position - global_position
+			to_target.y = 0
+		if is_instance_valid(target) and not target.dead:
+			_update_swing(delta, to_target)
+		else:
+			_update_swing(delta, Vector3(999, 0, 0))
+		# roll: spin the wheel by the distance covered, lean into the speed,
+		# rock back when knocked, and wobble to keep balance
+		var fwd := Vector3(sin(_body.rotation.y), 0, cos(_body.rotation.y))
+		var along := Vector3(velocity.x, 0, velocity.z).dot(fwd)
+		_wheel_spin += along * delta / _wheel_r
+		for hub in _hubs:
+			hub.rotation.x = _wheel_spin
+		var want_lean := clampf(along * 0.07, -0.3, 0.3) - 0.12 * _arm_raise
+		_lean = lerpf(_lean, want_lean, minf(1.0, delta * 6.0))
+		_body.rotation.x = _lean
+		_body.rotation.z = sin(_t * 2.3) * 0.035
+		_pose_arms()
 	else:
 		_body.position.y = absf(sin(_walk)) * 0.04
 		_body.rotation.z = sin(_walk) * 0.05
