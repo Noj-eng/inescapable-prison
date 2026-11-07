@@ -2,3 +2,8 @@
 .godot/
 /android/
 *.tmp
+
+# Meshy models are big: they live on Jon's PC (and the shared project folder), not in git
+models/*.glb
+models/*.glb.import
+models/*_texture_*

@@ -11,6 +11,7 @@ signal died
 const Look := preload("res://scripts/3d/look_3d.gd")
 const ARC_SHADER := preload("res://shaders/punch_arc_3d.gdshader")
 const MODEL_PATH := "res://models/victor.glb"
+const MeshyRig := preload("res://scripts/3d/meshy_rig.gd")
 const HEIGHT := 2.2               # metres: Victor is a big man
 const SPEED := 4.2
 const PUNCH_REACH := 1.9
@@ -44,8 +45,7 @@ var _leg_r: Node3D
 var _skin_mat: StandardMaterial3D
 # the Meshy model, if present
 var _model: Node3D
-var _anim: AnimationPlayer
-var _clips := {}
+var _mrig: RefCounted   # MeshyRig, when the Meshy model is loaded
 
 var _swipe: MeshInstance3D
 var _swipe_mat: ShaderMaterial
@@ -83,50 +83,10 @@ func _ready() -> void:
 # --- body ----------------------------------------------------------------------
 
 func _load_model() -> void:
-	var scene: PackedScene = load(MODEL_PATH)
-	_model = scene.instantiate()
-	_rig.add_child(_model)
-	# scale the model so it stands HEIGHT metres tall, feet on the floor
-	var box := _model_aabb(_model)
-	if box.size.y > 0.01:
-		var s := HEIGHT / box.size.y
-		_model.scale = Vector3.ONE * s
-		_model.position.y = -box.position.y * s
-	_anim = _find_anim(_model)
-	if _anim:
-		for clip in _anim.get_animation_list():
-			var n := String(clip).to_lower()
-			if not _clips.has("punch") and (n.contains("punch") or n.contains("attack") or n.contains("hit")):
-				_clips["punch"] = clip
-			elif not _clips.has("walk") and (n.contains("walk") or n.contains("run")):
-				_clips["walk"] = clip
-			elif not _clips.has("idle") and n.contains("idle"):
-				_clips["idle"] = clip
-		for key in ["walk", "idle"]:
-			if _clips.has(key):
-				_anim.get_animation(_clips[key]).loop_mode = Animation.LOOP_LINEAR
-
-
-func _model_aabb(n: Node) -> AABB:
-	var box := AABB()
-	var first := true
-	for c in n.find_children("*", "VisualInstance3D", true, false):
-		var vi := c as VisualInstance3D
-		var b: AABB = vi.global_transform * vi.get_aabb() if vi.is_inside_tree() else vi.get_aabb()
-		box = b if first else box.merge(b)
-		first = false
-	return box
-
-
-func _find_anim(n: Node) -> AnimationPlayer:
-	var found := n.find_children("*", "AnimationPlayer", true, false)
-	return found[0] if found.size() > 0 else null
-
-
-func _play(key: String, speed := 1.0) -> void:
-	if _anim and _clips.has(key):
-		if _anim.current_animation != _clips[key] or key == "punch":
-			_anim.play(_clips[key], 0.08, speed)
+	# Jon's Meshy model. Its walk/run clip plays while moving; punches bend
+	# the arm and spine bones on top of it, so no punch clip is needed.
+	_mrig = MeshyRig.load_into(_rig, MODEL_PATH, HEIGHT)
+	_model = _mrig.model
 
 
 ## A placeholder Victor: a huge bald brute in a torn orange jumpsuit, arms
@@ -204,7 +164,6 @@ func _punch() -> void:
 	_punch_side = -_punch_side
 	_combo_timer = 0.55
 	_knock += facing * 3.0     # small lunge forward
-	_play("punch", 1.6)
 
 	var reach := PUNCH_REACH * (1.25 if heavy else 1.0)
 	_start_swipe(reach, heavy)
@@ -342,9 +301,21 @@ func _physics_process(delta: float) -> void:
 
 
 func _animate(walking: bool) -> void:
-	if _model:
-		if _punch_time <= 0.0:
-			_play("walk" if walking else "idle")
+	if _mrig:
+		_mrig.update(get_physics_process_delta_time(), walking, 1.15)
+		# the punch: throw the arm forward, twist the shoulders into it
+		var pk := 1.0 - _punch_time / PUNCH_ANIM if _punch_time > 0.0 else 0.0
+		var throw := sin(pk * PI) if _punch_time > 0.0 else 0.0
+		var side := "r" if _punch_side > 0 else "l"
+		var heavy := 1.3 if _combo == 0 and _punch_time > 0.0 else 1.0   # combo has already advanced
+		_mrig.turn("spine", Vector3.UP, 0.45 * throw * _punch_side * heavy)
+		_mrig.turn("arm_" + side, Vector3.RIGHT, -1.5 * throw)
+		_mrig.turn("fore_" + side, Vector3.RIGHT, -0.9 * throw)
+		# guard up between punches
+		if _combo_timer > 0.0:
+			_mrig.turn("fore_l", Vector3.RIGHT, -0.5 * (1.0 - throw))
+			_mrig.turn("fore_r", Vector3.RIGHT, -0.5 * (1.0 - throw))
+		_mrig.flash(_hurt * 3.0, Color(1, 0.2, 0.15))
 		return
 	# stand-in: swing legs, pump the punching arm forward, flash red when hurt
 	var swing := sin(_walk) * 0.6

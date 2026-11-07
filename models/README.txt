@@ -1,11 +1,12 @@
-Put Victor's rigged model from Meshy here as:  victor.glb
-The 3D test scene (scenes/cellblock_3d.tscn) picks it up automatically and
-uses it instead of the stand-in shape. Animations are found by name: any
-clip with "idle", "walk"/"run", or "punch"/"attack"/"hit" in its name.
+Put your Meshy character files here (GLB format):
 
-wheel_unit.glb  (the one-wheeled Detention Unit robot guard)
-  Rig it in Meshy with the humanoid rig, leg markers on either side of the
-  wheel. Save it here as wheel_unit.glb. The game only moves its spine and
-  arm bones (for the baton swing) and never plays the leg animations. It
-  rolls and leans the whole body in code, spins glowing hubs on the wheel,
-  and puts a glowing stun baton in its right hand for you.
+  victor.glb      Victor (the Ironclad Inmate). Uses its walk/run clip;
+                  punches are added in code, so no punch clip is needed.
+  guard.glb       The prison guard. Uses its walk clip.
+  wheel_unit.glb  The one-wheeled Detention Unit robot. Only its spine and
+                  arm bones are used (for the baton swing); its leg bones
+                  sit on the wheel and are never animated. It rolls, leans
+                  and gets its glowing stun baton in code.
+
+If a file is missing, the game uses a simple stand-in instead.
+These files are large, so they are not uploaded to GitHub.

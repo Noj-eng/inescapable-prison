@@ -13,6 +13,9 @@ signal defeated(at: Vector3)
 const Look := preload("res://scripts/3d/look_3d.gd")
 const WAKE_DISTANCE := 10.0
 const ROBOT_MODEL := "res://models/wheel_unit.glb"
+const GUARD_MODEL := "res://models/guard.glb"
+const GUARD_HEIGHT := 1.95
+const MeshyRig := preload("res://scripts/3d/meshy_rig.gd")
 const ROBOT_HEIGHT := 2.5          # metres: a head taller than Victor
 const SWING_RANGE := 1.5
 const SWING_WINDUP := 0.55
@@ -57,7 +60,7 @@ var _shoulder_l: Node3D
 var _model: Node3D
 var _skel: Skeleton3D
 var _bones := {}                   # "arm_r", "fore_r", "hand_r", "arm_l", "spine" -> bone index
-var _flash_overlay: StandardMaterial3D
+var _mrig: RefCounted              # MeshyRig when a Meshy model is loaded
 
 
 func _ready() -> void:
@@ -82,8 +85,18 @@ func _ready() -> void:
 		else:
 			_build_robot()
 		_build_baton()
+	elif ResourceLoader.exists(GUARD_MODEL):
+		_mrig = MeshyRig.load_into(_body, GUARD_MODEL, GUARD_HEIGHT)
 	else:
 		_build_guard()
+	if _mrig:
+		# Meshy textures are dark: a faint light up front keeps the shape readable
+		var rim := OmniLight3D.new()
+		rim.light_color = Color(1.0, 0.35, 0.3) if kind == "robot" else Color(0.75, 0.85, 1.0)
+		rim.light_energy = 1.4
+		rim.omni_range = 3.0
+		rim.position = Vector3(0, (ROBOT_HEIGHT if kind == "robot" else GUARD_HEIGHT) * 0.8, 0.9)
+		_body.add_child(rim)
 
 
 func _mat(c: Color) -> StandardMaterial3D:
@@ -162,101 +175,22 @@ func _build_robot() -> void:
 
 
 func _load_robot_model() -> void:
-	var scene: PackedScene = load(ROBOT_MODEL)
-	_model = scene.instantiate()
-	_body.add_child(_model)
-	# never play the rig's own clips: its "legs" are really the wheel
-	for ap in _model.find_children("*", "AnimationPlayer", true, false):
-		(ap as AnimationPlayer).stop()
-		(ap as AnimationPlayer).autoplay = ""
-	var box := _model_aabb(_model)
-	if box.size.y > 0.01:
-		var s := ROBOT_HEIGHT / box.size.y
-		_model.scale = Vector3.ONE * s
-		_model.position.y = -box.position.y * s
-		# the tyre takes up roughly the bottom 45% of the model
-		_wheel_r = ROBOT_HEIGHT * 0.21
-		_wheel_y = _wheel_r
-	_flash_overlay = StandardMaterial3D.new()
-	_flash_overlay.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	_flash_overlay.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	_flash_overlay.albedo_color = Color(1, 0.95, 0.9, 0.0)
-	for mi in _model.find_children("*", "GeometryInstance3D", true, false):
-		(mi as GeometryInstance3D).material_overlay = _flash_overlay
-		(mi as GeometryInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
-	var skels := _model.find_children("*", "Skeleton3D", true, false)
-	if skels.size() > 0:
-		_skel = skels[0]
-		_find_bones()
-		if _bones.has("foot_r") and _bones.has("knee_r"):
-			# Jon put the knee and foot markers on the wheel: use them to find its centre
-			var a := _bone_world(_bones["knee_r"])
-			var b := _bone_world(_bones["foot_r"])
-			var centre := _body.to_local((a + b) * 0.5)
-			if centre.y > 0.2:
-				_wheel_y = centre.y
-				_wheel_r = clampf(centre.y, 0.3, 0.8)
+	_mrig = MeshyRig.load_into(_body, ROBOT_MODEL, ROBOT_HEIGHT)
+	_mrig.freeze_legs = true       # its "legs" are the wheel
+	_model = _mrig.model
+	_skel = _mrig.skel
+	_bones = _mrig.bones
+	# the tyre takes up roughly the bottom 40% of the model
+	_wheel_r = ROBOT_HEIGHT * 0.2
+	_wheel_y = _wheel_r
+	if _skel and _bones.has("foot_r") and _bones.has("knee_r"):
+		# Jon put the knee and foot markers on the wheel: use them to find its centre
+		_mrig.update(0.0, false)
+		var centre := _body.to_local((_mrig.bone_world("knee_r") + _mrig.bone_world("foot_r")) * 0.5)
+		if centre.y > 0.2 and centre.y < ROBOT_HEIGHT * 0.4:
+			_wheel_y = centre.y
+			_wheel_r = clampf(centre.y, 0.3, 0.8)
 	_add_hubs()
-
-
-func _model_aabb(n: Node) -> AABB:
-	var box := AABB()
-	var first := true
-	for c in n.find_children("*", "VisualInstance3D", true, false):
-		var vi := c as VisualInstance3D
-		var b: AABB = vi.global_transform * vi.get_aabb() if vi.is_inside_tree() else vi.get_aabb()
-		box = b if first else box.merge(b)
-		first = false
-	# back into this body's local space, unscaled
-	return _body.global_transform.affine_inverse() * box
-
-
-func _bone_named(parts: Array, side: String) -> int:
-	# Finds a bone by keywords, e.g. ["forearm", "lowerarm"] on side "r".
-	# Works with Meshy, Mixamo ("mixamorig:RightForeArm") and "_r"/".R" styles.
-	var best := -1
-	var best_len := 9999
-	for i in _skel.get_bone_count():
-		var n := _skel.get_bone_name(i).to_lower().replace("mixamorig:", "").replace("mixamorig_", "")
-		if side == "r" and not (n.contains("right") or n.ends_with("_r") or n.ends_with(".r") or n.begins_with("r_")):
-			continue
-		if side == "l" and not (n.contains("left") or n.ends_with("_l") or n.ends_with(".l") or n.begins_with("l_")):
-			continue
-		var hit := false
-		for p: String in parts:
-			if n.contains(p):
-				hit = true
-		if not hit:
-			continue
-		if n.contains("finger") or n.contains("thumb") or n.contains("index") or n.contains("twist") or n.contains("end"):
-			continue
-		if n.length() < best_len:
-			best = i
-			best_len = n.length()
-	return best
-
-
-func _find_bones() -> void:
-	for side in ["r", "l"]:
-		var fore := _bone_named(["forearm", "lowerarm", "elbow"], side)
-		var hand := _bone_named(["hand", "wrist"], side)
-		# the upper arm: "arm" but not the forearm/lower arm
-		var arm := -1
-		for i in _skel.get_bone_count():
-			if i == fore or i == hand:
-				continue
-			if _skel.get_bone_children(i).has(fore):
-				arm = i
-		if arm >= 0: _bones["arm_" + side] = arm
-		if fore >= 0: _bones["fore_" + side] = fore
-		if hand >= 0: _bones["hand_" + side] = hand
-		var knee := _bone_named(["leg", "shin", "calf", "knee"], side)
-		var foot := _bone_named(["foot", "ankle"], side)
-		if knee >= 0 and not _skel.get_bone_name(knee).to_lower().contains("up"):
-			_bones["knee_" + side] = knee
-		if foot >= 0: _bones["foot_" + side] = foot
-	var spine := _bone_named(["spine2", "spine02", "spine_02", "chest", "spine1", "spine01", "spine"], "")
-	if spine >= 0: _bones["spine"] = spine
 
 
 func _bone_world(i: int) -> Vector3:
@@ -270,7 +204,7 @@ func _add_hubs() -> void:
 	var spoke_mat := Look.steel(Color("1c1c1e"))
 	for side: int in [-1, 1]:
 		var hub := Node3D.new()
-		hub.position = Vector3(0.15 * side, _wheel_y, 0)
+		hub.position = Vector3(0.2 * side, _wheel_y, 0)
 		_body.add_child(hub)
 		var ring := MeshInstance3D.new()
 		var torus := TorusMesh.new()
@@ -338,9 +272,7 @@ func _pose_arms() -> void:
 		_elbow_r.rotation.x = elbow
 		_shoulder_l.rotation.x = -0.2 + 0.25 * _arm_raise
 	if _skel:
-		for key in ["arm_r", "fore_r", "spine", "arm_l"]:
-			if _bones.has(key):
-				_skel.reset_bone_pose(_bones[key])
+		_mrig.update(get_physics_process_delta_time(), false)
 		_rotate_bone("arm_r", Vector3.RIGHT, shoulder + 0.35)
 		_rotate_bone("fore_r", Vector3.RIGHT, elbow + 0.5)
 		_rotate_bone("arm_l", Vector3.RIGHT, 0.25 * _arm_raise)
@@ -428,8 +360,8 @@ func _physics_process(delta: float) -> void:
 		m.emission_enabled = _flash > 0.0
 		m.emission = Color(1, 0.9, 0.85)
 		m.emission_energy_multiplier = _flash * 20.0
-	if _flash_overlay:
-		_flash_overlay.albedo_color.a = minf(0.85, _flash * 6.0)
+	if _mrig:
+		_mrig.flash(_flash * 6.0)
 	if not is_on_floor():
 		velocity.y -= 20.0 * delta
 	var move := Vector3.ZERO
@@ -490,6 +422,8 @@ func _physics_process(delta: float) -> void:
 		_body.rotation.x = _lean
 		_body.rotation.z = sin(_t * 2.3) * 0.035
 		_pose_arms()
+	elif _mrig:
+		_mrig.update(delta, move != Vector3.ZERO, speed / 1.6)
 	else:
 		_body.position.y = absf(sin(_walk)) * 0.04
 		_body.rotation.z = sin(_walk) * 0.05
