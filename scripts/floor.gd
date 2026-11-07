@@ -14,6 +14,23 @@ var cells: Array[Vector2] = []:
 		queue_redraw()
 
 
+var cracks: Array[PackedVector2Array] = []
+
+
+## Splits the floor with jagged cracks spreading out from a point (the earthquake).
+func add_cracks(center: Vector2, count: int) -> void:
+	for i in count:
+		var angle := randf() * TAU
+		var p := center
+		var line := PackedVector2Array([p])
+		for step in randi_range(4, 7):
+			angle += randf_range(-0.6, 0.6)
+			p += Vector2(cos(angle), sin(angle) * 0.5) * randf_range(10, 20)
+			line.append(p)
+		cracks.append(line)
+	queue_redraw()
+
+
 func _draw() -> void:
 	for cell in cells:
 		var c := Vector2((cell.x - cell.y) * TILE_W * 0.5, (cell.x + cell.y) * TILE_H * 0.5)
@@ -27,3 +44,6 @@ func _draw() -> void:
 		draw_colored_polygon(pts, COLOR_A if checker else COLOR_B)
 		pts.append(pts[0])
 		draw_polyline(pts, GROUT, 1.0)
+	for line in cracks:
+		draw_polyline(line, Color("15181f"), 2.5)
+		draw_polyline(line, Color("4c566c"), 0.8)

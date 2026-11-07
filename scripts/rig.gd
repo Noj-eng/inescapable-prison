@@ -1,7 +1,7 @@
 extends StaticBody2D
 ## The containment rig: a heavy upright ring that holds the villain in the air,
 ## arms spread, limbs locked in mechanical casings and pinned by energy.
-## The villain starts the game inside it. Once released it powers down.
+## The villain starts the game inside it, until an earthquake shorts it out.
 
 const STEEL := Color("4a5160")
 const STEEL_DARK := Color("272c36")
@@ -13,6 +13,7 @@ const RING_CENTER := Vector2(0, -52)
 const RING_RADIUS := Vector2(48, 50)
 
 var powered := true
+var _sparking := 0.0  # seconds of shorting-out sparks left
 var _t := 0.0
 var _arc_timer := 0.0
 var _arc_seed := 0
@@ -29,13 +30,15 @@ func _ready() -> void:
 		add_child(shape)
 
 
-func power_down() -> void:
+## The earthquake hits: the rig shorts out in a shower of sparks and goes dark.
+func fail() -> void:
 	powered = false
-	queue_redraw()
+	_sparking = 1.6
 
 
 func _process(delta: float) -> void:
 	_t += delta
+	_sparking = maxf(0.0, _sparking - delta)
 	_arc_timer -= delta
 	if _arc_timer <= 0.0:
 		_arc_timer = 0.06
@@ -82,6 +85,18 @@ func _draw() -> void:
 			_arc(rng, Vector2(36 * side, -56), Vector2(48 * side, -30), 4)
 		_arc(rng, Vector2(-3, -16), Vector2(-6, 0), 4)
 		_arc(rng, Vector2(3, -16), Vector2(6, 0), 4)
+	elif _sparking > 0.0:
+		# shorting out: wild arcs and sparks jumping off the clamps and ring
+		var rng := RandomNumberGenerator.new()
+		rng.seed = _arc_seed
+		for i in 4:
+			var side := -1 if rng.randf() < 0.5 else 1
+			var from := Vector2(36 * side, -56)
+			var to := from + Vector2(rng.randf_range(-30, 30), rng.randf_range(-40, 30))
+			_arc(rng, from, to, 4)
+		for i in 10:
+			var p := RING_CENTER + Vector2(rng.randf_range(-50, 50), rng.randf_range(-50, 50))
+			draw_circle(p, rng.randf_range(0.8, 2.0), Color(1.0, 0.9, 0.5))
 
 
 func _arc(rng: RandomNumberGenerator, from: Vector2, to: Vector2, segments: int) -> void:
