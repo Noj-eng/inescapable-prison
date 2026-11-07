@@ -15,6 +15,9 @@ func _ready() -> void:
 		"bunk": footprint = 0.8
 		"toilet": footprint = 0.45
 		"table": footprint = 0.7
+		"crate": footprint = 0.75
+		"pillar": footprint = 0.55
+		"console": footprint = 0.6
 	var shape := CollisionPolygon2D.new()
 	shape.polygon = _diamond(footprint, 0.0)
 	add_child(shape)
@@ -44,6 +47,17 @@ func _draw() -> void:
 			draw_circle(Vector2(0, -12), 4.0, Color("6c7380"))
 		"table":
 			_draw_box(0.7, 18.0, Color("8a6a48"), Color("5e4630"), Color("72563b"))
+		"crate":
+			_draw_box(0.75, 26.0, Color("6b6a3a"), Color("45452a"), Color("575632"))
+			_draw_top_edge(0.75, 26.0, Color("8a8950"))
+		"pillar":
+			_draw_box(0.7, 8.0, Color("4b5468"), Color("2b3141"), Color("373e51"))
+			_draw_box(0.55, 80.0, Color("566078"), Color("2b3141"), Color("394053"))
+			draw_line(Vector2(-12, -46), Vector2(0, -40), Color("d9a521"), 2.0)
+			draw_line(Vector2(0, -40), Vector2(12, -46), Color("d9a521"), 2.0)
+		"console":
+			_draw_box(0.6, 22.0, Color("2a303c"), Color("1b1f27"), Color("242a34"))
+			draw_rect(Rect2(Vector2(-8, -27), Vector2(16, 6)), Color(0.3, 1.0, 0.6, 0.7))
 
 
 ## A diamond the shape of a tile, scaled by s, lifted up by h pixels.

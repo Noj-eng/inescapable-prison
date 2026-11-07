@@ -1,16 +1,22 @@
 extends CharacterBody2D
-## The villain. Walk with WASD or the arrow keys, slam with Space.
+## The villain. Walk with WASD or the arrow keys, slam with Space,
+## and once the plasma rifle is picked up, fire with a mouse click or F.
 ## Starts suspended in the containment rig until the earthquake drops them.
 ## Arms and shins are locked in heavy mechanical casings. Every enemy knocked
 ## out cracks one casing off; the last one is saved for the first boss.
 ## Drawn with simple shapes for now.
 
 signal casing_broken(piece: int)
+signal health_changed(hp: int, max_hp: int)
+signal died
 
 const SPEED := 120.0
 const HOVER := 16.0          # how high the rig holds the villain off the floor
 const SLAM_RANGE := 42.0     # how far the casing slam reaches
 const SLAM_COOLDOWN := 0.55
+const MAX_HP := 10
+const INVULNERABLE_TIME := 0.8   # seconds of safety after taking a hit
+const FIRE_COOLDOWN := 0.22
 
 const SUIT := Color("ee7a2b")
 const SUIT_DARK := Color("b85a1c")
@@ -27,12 +33,18 @@ var hover := HOVER
 var facing := 1.0
 var walk_time := 0.0
 var broken := [false, false, false, false]
+var hp := MAX_HP
+var dead := false
+var has_rifle := false
 
 var _t := 0.0
 var _knock := Vector2.ZERO
 var _hurt_flash := 0.0
 var _slam_time := 0.0        # counts down while the slam animation plays
 var _slam_cooldown := 0.0
+var _invulnerable := 0.0
+var _fire_cooldown := 0.0
+var _muzzle_flash := 0.0
 var _shake_time := 0.0
 var _shake_amount := 0.0
 var _cam: Camera2D
@@ -61,16 +73,46 @@ func drop() -> void:
 	tween.tween_callback(shake.bind(4.0, 0.25))
 
 
+## Jump the camera straight to the villain (used when a new level loads).
+func snap_camera() -> void:
+	_cam.reset_smoothing()
+
+
+func heal(amount: int) -> void:
+	hp = mini(MAX_HP, hp + amount)
+	health_changed.emit(hp, MAX_HP)
+
+
+## Back on your feet after a game over, with the health and casings given.
+func revive(new_hp: int, casings: Array) -> void:
+	dead = false
+	held = false
+	hover = 0.0
+	hp = new_hp
+	broken = casings.duplicate()
+	_knock = Vector2.ZERO
+	_invulnerable = 1.0
+	health_changed.emit(hp, MAX_HP)
+
+
 func shake(amount: float, duration: float) -> void:
 	_shake_amount = amount
 	_shake_time = duration
 
 
-## An enemy hit us: get shoved back and flash red.
-func hit(from: Vector2) -> void:
-	_knock = (global_position - from).normalized() * 220.0
+## An enemy hit us: lose health, get shoved back, and flash red.
+func hit(from: Vector2, damage: int = 1, force: float = 220.0) -> void:
+	if dead or held or _invulnerable > 0.0:
+		return
+	hp = maxi(0, hp - damage)
+	health_changed.emit(hp, MAX_HP)
+	_knock = (global_position - from).normalized() * force
 	_hurt_flash = 0.25
-	shake(3.0, 0.2)
+	_invulnerable = INVULNERABLE_TIME
+	shake(3.0 + damage * 2.0, 0.25)
+	if hp == 0:
+		dead = true
+		died.emit()
 
 
 ## Breaks the next casing. Returns false if only the boss's piece is left.
@@ -82,6 +124,13 @@ func break_next_casing() -> bool:
 			shake(5.0, 0.3)
 			return true
 	return false
+
+
+## Only beating the guard captain breaks the last casing.
+func break_final_casing() -> void:
+	broken[Piece.RIGHT_LEG] = true
+	casing_broken.emit(Piece.RIGHT_LEG)
+	shake(8.0, 0.5)
 
 
 func _read_input() -> Vector2:
@@ -111,13 +160,24 @@ func _physics_process(delta: float) -> void:
 	_hurt_flash = maxf(0.0, _hurt_flash - delta)
 	_slam_time = maxf(0.0, _slam_time - delta)
 	_slam_cooldown = maxf(0.0, _slam_cooldown - delta)
+	_invulnerable = maxf(0.0, _invulnerable - delta)
+	_fire_cooldown = maxf(0.0, _fire_cooldown - delta)
+	_muzzle_flash = maxf(0.0, _muzzle_flash - delta)
 	queue_redraw()
 	if held:
+		return
+	if dead:
+		velocity = _knock
+		_knock = _knock.move_toward(Vector2.ZERO, 900.0 * delta)
+		move_and_slide()
 		return
 
 	var input := _read_input()
 	if Input.is_key_pressed(KEY_SPACE) and _slam_cooldown <= 0.0:
 		_slam()
+	var firing := Input.is_key_pressed(KEY_F) or Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
+	if has_rifle and firing and _fire_cooldown <= 0.0:
+		_fire()
 
 	# Squash vertical movement by half so it matches the isometric floor.
 	var move := Vector2(input.x, input.y * 0.5).normalized() * SPEED if input != Vector2.ZERO else Vector2.ZERO
@@ -140,8 +200,23 @@ func _slam() -> void:
 	for enemy in get_tree().get_nodes_in_group("enemies"):
 		var d: Vector2 = enemy.global_position - global_position
 		# Measure distance on the flat floor (undo the isometric squash).
-		if Vector2(d.x, d.y * 2.0).length() < SLAM_RANGE * 1.4:
+		if Vector2(d.x, d.y * 2.0).length() < SLAM_RANGE * 1.4 + enemy.hit_radius:
 			enemy.take_hit(global_position)
+
+
+## Fire a plasma bolt toward the mouse (or straight ahead when using F).
+func _fire() -> void:
+	_fire_cooldown = FIRE_COOLDOWN
+	_muzzle_flash = 0.06
+	var aim := get_global_mouse_position() - global_position
+	if Input.is_key_pressed(KEY_F) or aim.length() < 4.0:
+		aim = Vector2(facing, 0)
+	facing = signf(aim.x) if absf(aim.x) > 1.0 else facing
+	var bolt := Node2D.new()
+	bolt.set_script(preload("res://scripts/plasma_bolt.gd"))
+	bolt.direction = aim.normalized()
+	bolt.position = global_position + bolt.direction * 14.0
+	get_parent().add_child(bolt)
 
 
 func _draw() -> void:
@@ -156,8 +231,20 @@ func _draw() -> void:
 	draw_circle(Vector2.ZERO, 13.0, Color(0, 0, 0, 0.35))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
-	modulate = Color(1, 0.45, 0.45) if _hurt_flash > 0.0 else Color.WHITE
-	if held:
+	if dead:
+		modulate = Color(0.55, 0.55, 0.6)
+	elif _hurt_flash > 0.0:
+		modulate = Color(1, 0.45, 0.45)
+	elif _invulnerable > 0.0 and int(_t * 20.0) % 2 == 0:
+		modulate = Color(1, 1, 1, 0.45)  # blink while invulnerable
+	else:
+		modulate = Color.WHITE
+	if dead:
+		# slumped on the floor
+		draw_set_transform(Vector2(0, -4), PI * 0.5 * facing, Vector2.ONE)
+		_draw_free()
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	elif held:
 		_draw_held()
 	else:
 		_draw_free()
@@ -186,14 +273,32 @@ func _draw_free() -> void:
 	for side: int in [-1, 1]:
 		var shoulder := o + Vector2(10 * side, -32)
 		var hand: Vector2
-		if _slam_time > 0.15:
+		if has_rifle and _slam_time <= 0.0:
+			hand = o + Vector2((14 + 4 * side) * facing, -24)  # both hands on the rifle
+		elif _slam_time > 0.15:
 			hand = o + Vector2(6 * side, -58)        # arms raised overhead
 		elif _slam_time > 0.0:
 			hand = o + Vector2(16 * side, -6)        # smashing down
 		else:
 			hand = o + Vector2(13 * side - stride * side * 0.8, -14)
 		_arm(shoulder, hand, Piece.LEFT_ARM if side < 0 else Piece.RIGHT_ARM)
+	if has_rifle and _slam_time <= 0.0:
+		_draw_rifle(o)
 	_head(o, facing)
+
+
+func _draw_rifle(o: Vector2) -> void:
+	var f := facing
+	var back := o + Vector2(2 * f, -23)
+	var tip := o + Vector2(30 * f, -27)
+	draw_line(back, tip, Color("15171d"), 6.0)
+	draw_line(back, tip, Color("3b4150"), 4.0)
+	# glowing plasma coils along the barrel
+	for t in [0.45, 0.6, 0.75]:
+		draw_circle(back.lerp(tip, t), 2.2, Color("b25cff"))
+	if _muzzle_flash > 0.0:
+		draw_circle(tip, 6.0, Color(0.85, 0.6, 1.0, 0.8))
+		draw_circle(tip, 3.0, Color.WHITE)
 
 
 func _leg(foot: Vector2, stride: float, piece: int) -> void:

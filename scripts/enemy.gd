@@ -8,6 +8,8 @@ var kind := "guard"    # "guard" or "robot"
 var target: Node2D
 var hp := 3
 var speed := 70.0
+var damage := 1
+var hit_radius := 0.0   # extra reach for attacks aimed at this enemy (big bodies)
 
 var _knock := Vector2.ZERO
 var _flash := 0.0
@@ -63,7 +65,7 @@ func _physics_process(delta: float) -> void:
 	queue_redraw()
 
 	var move := Vector2.ZERO
-	if not _dead and is_instance_valid(target):
+	if not _dead and is_instance_valid(target) and not target.dead:
 		var to := target.global_position - global_position
 		var flat := Vector2(to.x, to.y * 2.0)
 		if flat.length() > 16.0:
@@ -73,7 +75,7 @@ func _physics_process(delta: float) -> void:
 				dir = (dir * 0.3 + _detour).normalized()
 			move = Vector2(dir.x, dir.y * 0.5).normalized() * speed
 		elif _touch_cooldown <= 0.0:
-			target.hit(global_position)
+			target.hit(global_position, damage)
 			_touch_cooldown = 1.0
 		if absf(to.x) > 2.0:
 			_facing = signf(to.x)
