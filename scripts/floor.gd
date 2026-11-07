@@ -87,12 +87,12 @@ func _draw() -> void:
 		var bottom := c + Vector2(0, TILE_H * 0.5)
 		var left := c + Vector2(-TILE_W * 0.5, 0)
 		var pts := PackedVector2Array([top, right, bottom, left])
-		var material := theme
+		var surface := theme
 		if theme == "mixed":
-			material = "steel" if (int(cell.x) / 3 + int(cell.y) / 3) % 2 == 0 else "concrete"
+			surface = "steel" if (floori(cell.x / 3.0) + floori(cell.y / 3.0)) % 2 == 0 else "concrete"
 		if cell in vents:
-			material = "grating"
-		match material:
+			surface = "grating"
+		match surface:
 			"concrete": _concrete(pts, rng)
 			"steel": _steel(pts, rng)
 			"grating": _grating(pts)

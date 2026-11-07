@@ -94,7 +94,7 @@ func _rebuild() -> void:
 		_text("[%d]" % (i + 1), Vector2(18, 16), Vector2(60, 24), 14, Color(0.8, 0.75, 0.65), false, card)
 		_text(kind_text, Vector2(70, 16), Vector2(w - 88, 24), 12, Color("4ff0ff") if item["kind"] == "power" else AMBER, false, card)
 		_text(item["name"], Vector2(18, 52), Vector2(w - 36, 30), 19, Color.WHITE, false, card)
-		var desc := _text(item["text"], Vector2(18, 92), Vector2(w - 36, 100), 14, Color(0.86, 0.84, 0.8), false, card, true)
+		_text(item["text"], Vector2(18, 92), Vector2(w - 36, 100), 14, Color(0.86, 0.84, 0.8), false, card, true)
 		var price := "SOLD" if item["sold"] else "%d SMOKES" % item["cost"]
 		var afford: bool = player.smokes >= item["cost"]
 		_text(price, Vector2(18, 210), Vector2(w - 36, 24), 16, Color(0.5, 0.5, 0.5) if item["sold"] else (Color("ff8a5a") if afford else Color(0.6, 0.3, 0.25)), false, card)

@@ -398,7 +398,7 @@ func _load_level(index: int) -> void:
 	atmosphere.set_script(AtmosphereScript)
 	add_child(atmosphere)
 	var beacons := []
-	for corner in [Vector2(1, 1), Vector2(cols - 2, 1), Vector2(1, rows - 2), Vector2(cols - 2, rows - 2), Vector2(cols / 2, rows / 2)]:
+	for corner in [Vector2(1, 1), Vector2(cols - 2, 1), Vector2(1, rows - 2), Vector2(cols - 2, rows - 2), Vector2(cols / 2.0, rows / 2.0).floor()]:
 		beacons.append(grid_to_screen(corner) + Vector2(0, -50))
 	atmosphere.setup(bounds, lamps, vents, beacons, index > 0)
 	_build_paths(map)

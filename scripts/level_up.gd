@@ -53,7 +53,7 @@ func open(choices: Array, abilities: Dictionary, ranks: Dictionary, new_level: i
 		_text("[%d]" % (i + 1), Vector2(18, 16), Vector2(60, 24), 14, Color(0.7, 0.78, 0.9), false, card)
 		_text(abilities[id]["name"], Vector2(18, 52), Vector2(w - 36, 30), 20, Color.WHITE, false, card)
 		_text("RANK %d > %d" % [rank, rank + 1] if rank > 0 else "NEW", Vector2(18, 84), Vector2(w - 36, 20), 13, NEON, false, card)
-		var desc := _text(abilities[id]["text"], Vector2(18, 118), Vector2(w - 36, 90), 15, Color(0.82, 0.86, 0.94), false, card, true)
+		_text(abilities[id]["text"], Vector2(18, 118), Vector2(w - 36, 90), 15, Color(0.82, 0.86, 0.94), false, card, true)
 	visible = true
 	get_tree().paused = true
 

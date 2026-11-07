@@ -144,8 +144,8 @@ func _draw_wall(h: float, back: bool) -> void:
 		# grime streaks running down from the top
 		for i in 2:
 			var t := _rng.randf_range(0.1, 0.9)
-			var len := _rng.randf_range(h * 0.2, h * 0.7)
-			draw_line(_face_point(1.0, side, t, h), _face_point(1.0, side, t, h - len), Color(0.05, 0.04, 0.03, 0.22), _rng.randf_range(1.5, 3.0))
+			var crack_len := _rng.randf_range(h * 0.2, h * 0.7)
+			draw_line(_face_point(1.0, side, t, h), _face_point(1.0, side, t, h - crack_len), Color(0.05, 0.04, 0.03, 0.22), _rng.randf_range(1.5, 3.0))
 	if back:
 		# a pair of service pipes along the top of the back walls
 		for side: int in [-1, 1]:
