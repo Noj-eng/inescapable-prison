@@ -10,7 +10,6 @@ signal died
 
 const Look := preload("res://scripts/3d/look_3d.gd")
 const ARC_SHADER := preload("res://shaders/punch_arc_3d.gdshader")
-const MODEL_PATH := "res://models/victor.glb"
 const MeshyRig := preload("res://scripts/3d/meshy_rig.gd")
 const HEIGHT := 2.2               # metres: Victor is a big man
 const SPEED := 4.2
@@ -65,7 +64,7 @@ func _ready() -> void:
 
 	_rig = Node3D.new()
 	add_child(_rig)
-	if ResourceLoader.exists(MODEL_PATH):
+	if MeshyRig.find("victor.glb") != "":
 		_load_model()
 	else:
 		_build_stand_in()
@@ -85,7 +84,7 @@ func _ready() -> void:
 func _load_model() -> void:
 	# Jon's Meshy model. Its walk/run clip plays while moving; punches bend
 	# the arm and spine bones on top of it, so no punch clip is needed.
-	_mrig = MeshyRig.load_into(_rig, MODEL_PATH, HEIGHT)
+	_mrig = MeshyRig.load_into(_rig, MeshyRig.find("victor.glb"), HEIGHT)
 	_model = _mrig.model
 
 

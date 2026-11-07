@@ -12,8 +12,6 @@ signal defeated(at: Vector3)
 
 const Look := preload("res://scripts/3d/look_3d.gd")
 const WAKE_DISTANCE := 10.0
-const ROBOT_MODEL := "res://models/wheel_unit.glb"
-const GUARD_MODEL := "res://models/guard.glb"
 const GUARD_HEIGHT := 1.95
 const MeshyRig := preload("res://scripts/3d/meshy_rig.gd")
 const ROBOT_HEIGHT := 2.5          # metres: a head taller than Victor
@@ -80,13 +78,13 @@ func _ready() -> void:
 		cap.radius = 0.45
 		cap.height = 2.2
 		shape.position.y = 1.1
-		if ResourceLoader.exists(ROBOT_MODEL):
+		if MeshyRig.find("wheel_unit.glb") != "":
 			_load_robot_model()
 		else:
 			_build_robot()
 		_build_baton()
-	elif ResourceLoader.exists(GUARD_MODEL):
-		_mrig = MeshyRig.load_into(_body, GUARD_MODEL, GUARD_HEIGHT)
+	elif MeshyRig.find("guard.glb") != "":
+		_mrig = MeshyRig.load_into(_body, MeshyRig.find("guard.glb"), GUARD_HEIGHT)
 	else:
 		_build_guard()
 	if _mrig:
@@ -175,7 +173,7 @@ func _build_robot() -> void:
 
 
 func _load_robot_model() -> void:
-	_mrig = MeshyRig.load_into(_body, ROBOT_MODEL, ROBOT_HEIGHT)
+	_mrig = MeshyRig.load_into(_body, MeshyRig.find("wheel_unit.glb"), ROBOT_HEIGHT)
 	_mrig.freeze_legs = true       # its "legs" are the wheel
 	_model = _mrig.model
 	_skel = _mrig.skel

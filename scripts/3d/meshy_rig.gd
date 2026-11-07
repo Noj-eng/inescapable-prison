@@ -17,6 +17,21 @@ var overlay: StandardMaterial3D
 var freeze_legs := false   # one-wheel robot: its "legs" are the wheel, never bend them
 var _leg_bones: Array[int] = []
 var _hips_rest := Vector3.ZERO
+static var _announced: Array[String] = []
+
+
+## Finds res://models/<name>, ignoring upper/lower case (Windows doesn't care
+## about "Wheel_unit.glb" vs "wheel_unit.glb", but Godot does). "" if missing.
+static func find(file_name: String) -> String:
+	var want := file_name.to_lower()
+	var dir := DirAccess.open("res://models")
+	if dir == null:
+		return ""
+	for f in dir.get_files():
+		var n := f.to_lower().trim_suffix(".import").trim_suffix(".remap")
+		if n == want:
+			return "res://models/" + f.trim_suffix(".import").trim_suffix(".remap")
+	return ""
 
 
 static func load_into(parent: Node3D, path: String, height: float) -> RefCounted:
@@ -27,6 +42,9 @@ static func load_into(parent: Node3D, path: String, height: float) -> RefCounted
 
 func _load(parent: Node3D, path: String, height: float) -> void:
 	var scene: PackedScene = load(path)
+	if _announced.find(path) < 0:
+		_announced.append(path)
+		print("Meshy model loaded: ", path)
 	model = scene.instantiate()
 	parent.add_child(model)
 	# size it: feet on the floor, `height` metres tall
