@@ -4,7 +4,7 @@ extends Node2D
 ## Map legend:
 ##   #  wall          B  cell bars       .  floor
 ##   b  bunk          t  toilet          d  table
-##   P  where the villain starts (on floor)
+##   R  the containment rig, where the villain starts the game
 ##
 ## Edit the map, press Play, and the room rebuilds itself.
 
@@ -15,10 +15,10 @@ const MAP := [
 	"###############",
 	"#b..#b..#b..#.#",
 	"#...#...#...#.#",
-	"#t..#tP.#t..#.#",
+	"#t..#t..#t..#.#",
 	"#BBB#B.B#BBB#.#",
 	"#.............#",
-	"#.............#",
+	"#.....R.......#",
 	"#..d.....d....#",
 	"#.............#",
 	"###############",
@@ -27,6 +27,7 @@ const MAP := [
 const BlockScript := preload("res://scripts/block.gd")
 const FloorScript := preload("res://scripts/floor.gd")
 const PlayerScript := preload("res://scripts/player.gd")
+const RigScript := preload("res://scripts/rig.gd")
 
 var world: Node2D
 
@@ -77,15 +78,24 @@ func _ready() -> void:
 					_add_block("toilet", cell)
 				"d":
 					_add_block("table", cell)
-				"P":
+				"R":
 					start = cell
 	floor_node.cells = floor_cells
+
+	# The containment rig sits a hair "behind" the villain so it draws first.
+	var rig := StaticBody2D.new()
+	rig.set_script(RigScript)
+	rig.name = "ContainmentRig"
+	rig.position = grid_to_screen(start) + Vector2(0, -1)
+	world.add_child(rig)
 
 	var player := CharacterBody2D.new()
 	player.set_script(PlayerScript)
 	player.name = "Villain"
 	player.position = grid_to_screen(start)
 	world.add_child(player)
+	player.released.connect(rig.power_down)
+	player.released.connect(_on_released)
 
 	_build_hud()
 
@@ -111,7 +121,7 @@ func _build_hud() -> void:
 	hud.add_child(title)
 
 	var help := Label.new()
-	help.text = "Move: WASD or arrow keys"
+	help.text = "Move: WASD or arrow keys  (first press releases you from the rig)"
 	help.position = Vector2(24, 50)
 	help.add_theme_font_size_override("font_size", 14)
 	help.add_theme_color_override("font_color", Color(0.75, 0.78, 0.85, 0.8))
@@ -134,3 +144,22 @@ func _build_hud() -> void:
 	tween.tween_interval(3.5)
 	tween.tween_property(intro, "modulate:a", 0.0, 1.5)
 	tween.tween_callback(intro.queue_free)
+
+
+func _on_released() -> void:
+	var hud := CanvasLayer.new()
+	add_child(hud)
+	var note := Label.new()
+	note.text = "Yard time.  The restraints stay on."
+	note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	note.position = Vector2(0, 540)
+	note.size = Vector2(1280, 40)
+	note.add_theme_font_size_override("font_size", 20)
+	note.add_theme_color_override("font_color", Color("5ff3ff"))
+	note.add_theme_color_override("font_outline_color", Color(0, 0, 0))
+	note.add_theme_constant_override("outline_size", 6)
+	hud.add_child(note)
+	var tween := create_tween()
+	tween.tween_interval(2.5)
+	tween.tween_property(note, "modulate:a", 0.0, 1.2)
+	tween.tween_callback(hud.queue_free)
