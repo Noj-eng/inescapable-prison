@@ -33,19 +33,25 @@ func roll_stock() -> void:
 	stock.clear()
 	var pool: Array = []
 	for id in player.RELICS:
-		if not player.has_relic(id):
+		var needs: String = player.RELICS[id].get("requires", "")
+		if not player.has_relic(id) and (needs == "" or player.has_relic(needs)):
 			pool.append(id)
 	pool.shuffle()
 	for id in pool.slice(0, 2):
 		var r: Dictionary = player.RELICS[id]
-		stock.append({"kind": "relic", "id": id, "name": r["name"], "text": r["text"], "cost": r["cost"], "sold": false})
+		stock.append({"kind": "relic", "id": id, "name": r["name"], "text": r["text"], "cost": _price(r["cost"]), "sold": false})
 	var powers: Array = player.roll_choices()
 	if powers.size() > 0:
 		var id: String = powers[0]
 		var a: Dictionary = player.ABILITIES[id]
 		var rank: int = player.rank(id)
-		stock.append({"kind": "power", "id": id, "name": a["name"], "text": a["text"], "cost": POWER_COST + 5 * rank, "sold": false,
+		stock.append({"kind": "power", "id": id, "name": a["name"], "text": a["text"], "cost": _price(POWER_COST + 5 * rank), "sold": false,
 			"rank": rank})
+
+
+## The Law Degree knows its rights: 30% off.
+func _price(base: int) -> int:
+	return maxi(1, roundi(base * (0.7 if player.has_relic("law_degree") else 1.0)))
 
 
 func open(quote: String) -> void:

@@ -580,6 +580,8 @@ func _on_enemy_defeated(at: Vector2, xp: int) -> void:
 	# Level clear: a casing cracks off, the villain catches their breath, and the lift opens.
 	player.break_next_casing()
 	player.heal(4)
+	if player.has_relic("keyring"):
+		player.add_smokes(5)
 	if lift:
 		lift.unlocked = true
 	if not await _wait(1.2): return
@@ -681,6 +683,10 @@ func _drop_smokes(at: Vector2, amount: int) -> void:
 
 func _on_smokes_changed(n: int) -> void:
 	smokes_label.text = "SMOKES  x %d" % n
+
+
+func on_remote_used() -> void:
+	_say("// CLICK //   EVERYONE FREEZES", Color("8fd8ff"), 1.2)
 
 
 func _on_trade_requested() -> void:

@@ -31,6 +31,7 @@ var _mat: ShaderMaterial
 var _squash := 0.0
 var _waypoint := Vector2.INF
 var _repath := 0.0
+var frozen := 0.0          # seconds left frozen by the Remote Control
 
 
 func _ready() -> void:
@@ -102,9 +103,19 @@ func _physics_process(delta: float) -> void:
 	var level_root := get_tree().current_scene
 	if not active and is_instance_valid(target) and not target.held:
 		# wake up when the villain is close *and* actually reachable (not behind a wall)
-		if global_position.distance_to(target.global_position) < WAKE_DISTANCE:
+		var wake := WAKE_DISTANCE * (0.6 if target.has_method("has_relic") and target.has_relic("orange") else 1.0)
+		if global_position.distance_to(target.global_position) < wake:
 			if not level_root.has_method("path_length") or level_root.path_length(global_position, target.global_position) < 11:
 				active = true
+	if frozen > 0.0 and not _dead:
+		# frozen like a paused TV: tinted blue, not moving, not attacking
+		frozen -= delta
+		self_modulate = Color(0.55, 0.8, 1.4)
+		velocity = _knock
+		_knock = _knock.move_toward(Vector2.ZERO, 900.0 * delta)
+		move_and_slide()
+		return
+	self_modulate = Color.WHITE
 	# route around walls toward the villain
 	_repath -= delta
 	if active and _repath <= 0.0 and is_instance_valid(target) and level_root.has_method("path_next"):

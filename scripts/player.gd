@@ -55,6 +55,15 @@ const RELICS := {
 	"carton": {"name": "CARTON OF SMOKES", "text": "Never smoked one. Just holding it calms you. +4 max health.", "cost": 12},
 	"photo": {"name": "WARDEN'S FAMILY PHOTO", "text": "Guards panic when they see it. Enemies drop double smokes.", "cost": 15},
 	"jumpsuit": {"name": "PADDED JUMPSUIT", "text": "Stuffed with mattress foam. Longer safety after being hit.", "cost": 12},
+	"chisel": {"name": "PRISON CHISEL", "text": "Six years of tunnelling, never finished. Robots take double damage.", "cost": 12},
+	"weights": {"name": "YARD WEIGHTS", "text": "Lifted daily. +2 max health and punches knock enemies 40% further.", "cost": 14},
+	"orange": {"name": "SPARE ORANGE JUMPSUIT", "text": "You look like every other inmate. Guards notice you later.", "cost": 10},
+	"handcuffs": {"name": "SNAPPED HANDCUFFS", "text": "Swung like brass knuckles on a chain. Punches reach 30% further.", "cost": 13},
+	"baton": {"name": "BROKEN BATON", "text": "Still crackling. Heavy hooks that land also zap the nearest enemy.", "cost": 15},
+	"keyring": {"name": "JANITOR'S KEY RING", "text": "Opens supply lockers. +5 smokes every time you clear a level.", "cost": 11},
+	"remote": {"name": "THE REMOTE CONTROL", "text": "From the TV room. Press Q to freeze every enemy for 3 seconds (20s recharge).", "cost": 20},
+	"diploma": {"name": "HIGH SCHOOL DIPLOMA", "text": "Earned the hard way, behind bars. +20% XP. Turkey might find you a Law Degree...", "cost": 12},
+	"law_degree": {"name": "LAW DEGREE", "text": "Correspondence course, passed with honours. Turkey charges you 30% less.", "cost": 20, "requires": "diploma"},
 }
 
 # --- state ---
@@ -76,6 +85,8 @@ var _knockouts := 0
 var smokes := 0                  # contraband: Turkey's currency
 var relics := {}                 # relic id -> true
 var _xp_bonus := 0.0
+var remote_cooldown := 0.0
+var _q_was_down := false
 
 var _t := 0.0
 var _knock := Vector2.ZERO
@@ -178,12 +189,16 @@ func take_relic(id: String) -> void:
 	if id == "carton":
 		max_hp += 4
 		heal(4)
+	elif id == "weights":
+		max_hp += 2
+		heal(2)
 	health_changed.emit(hp, max_hp)
 
 
 func add_xp(amount: int) -> void:
-	if has_relic("dice"):
-		_xp_bonus += amount * 0.5
+	var bonus := (0.5 if has_relic("dice") else 0.0) + (0.2 if has_relic("diploma") else 0.0)
+	if bonus > 0.0:
+		_xp_bonus += amount * bonus
 		var extra := floori(_xp_bonus)
 		_xp_bonus -= extra
 		amount += extra
@@ -379,6 +394,12 @@ func _physics_process(delta: float) -> void:
 
 	_passive_abilities(delta)
 
+	remote_cooldown = maxf(0.0, remote_cooldown - delta)
+	var q := Input.is_key_pressed(KEY_Q)
+	if q and not _q_was_down and has_relic("remote") and remote_cooldown <= 0.0:
+		_use_remote()
+	_q_was_down = q
+
 	# Squash vertical movement by half so it matches the isometric floor.
 	var move := Vector2(input.x, input.y * 0.5).normalized() * move_speed() if input != Vector2.ZERO else Vector2.ZERO
 	if _punch_time > 0.0:
@@ -405,19 +426,24 @@ func _punch() -> void:
 	_knock += Vector2(aim.x, aim.y * 0.5).normalized() * 90.0   # small lunge forward
 
 	var landed := false
-	var reach := PUNCH_REACH * (1.25 if heavy else 1.0)
+	var reach := PUNCH_REACH * (1.25 if heavy else 1.0) * (1.3 if has_relic("handcuffs") else 1.0)
+	var push := 1.4 if has_relic("weights") else 1.0
 	for enemy in get_tree().get_nodes_in_group("enemies"):
 		var d: Vector2 = enemy.global_position - global_position
 		var flat := Vector2(d.x, d.y * 2.0)
 		var dist: float = flat.length() - enemy.hit_radius
 		if dist < reach and (flat.length() < 10.0 or flat.normalized().dot(aim) > PUNCH_ARC):
 			var dmg := punch_damage() * ((3.0 if has_relic("hot_sauce") else 2.0) if heavy else 1.0)
-			enemy.take_hit(global_position, dmg, 420.0 if heavy else 260.0)
+			if has_relic("chisel") and enemy.get("kind") == "robot":
+				dmg *= 2.0
+			enemy.take_hit(global_position, dmg, (420.0 if heavy else 260.0) * push)
 			landed = true
 	if landed:
 		_impact = 0.35 if heavy else 0.15
 		shake(4.0 if heavy else 2.0, 0.1)
 		_hit_stop(0.09 if heavy else 0.05)
+	if landed and heavy and has_relic("baton"):
+		_zap_nearest(1.5, 200.0)
 	if heavy and rank("shockwave_fist") > 0:
 		_shockwave_fist()
 	_combo = (_combo + 1) % 3
@@ -449,19 +475,7 @@ func _passive_abilities(delta: float) -> void:
 		_zap_timer -= delta
 		if _zap_timer <= 0.0:
 			_zap_timer = 3.2 - 0.4 * rank("static_discharge")
-			var best: Node2D = null
-			var best_d := 220.0
-			for enemy in get_tree().get_nodes_in_group("enemies"):
-				var dd: float = enemy.global_position.distance_to(global_position)
-				if dd < best_d:
-					best_d = dd
-					best = enemy
-			if best:
-				best.take_hit(global_position, 1.0 + 0.5 * rank("static_discharge"), 120.0)
-				var rng := RandomNumberGenerator.new()
-				rng.randomize()
-				_zap_line = FX.jagged(Vector2(0, -26), best.global_position - global_position + Vector2(0, -20), 8, 6.0, rng)
-				_zap_time = 0.15
+			_zap_nearest(1.0 + 0.5 * rank("static_discharge"), 220.0)
 
 	# Shrapnel orbit: shards of broken casing circling him.
 	var shards := _shard_count()
@@ -475,6 +489,34 @@ func _passive_abilities(delta: float) -> void:
 				if Vector2(d.x, d.y * 2.0).length() < 14.0 + enemy.hit_radius and _shard_hit.get(enemy.get_instance_id(), 0.0) <= 0.0:
 					enemy.take_hit(p, 0.6 + 0.2 * rank("shrapnel_orbit"), 140.0)
 					_shard_hit[enemy.get_instance_id()] = 0.5
+
+
+## An arc of lightning to the nearest enemy in range.
+func _zap_nearest(dmg: float, max_range: float) -> void:
+	var best: Node2D = null
+	var best_d := max_range
+	for enemy in get_tree().get_nodes_in_group("enemies"):
+		var dd: float = enemy.global_position.distance_to(global_position)
+		if dd < best_d:
+			best_d = dd
+			best = enemy
+	if best:
+		best.take_hit(global_position, dmg, 120.0)
+		var rng := RandomNumberGenerator.new()
+		rng.randomize()
+		_zap_line = FX.jagged(Vector2(0, -26), best.global_position - global_position + Vector2(0, -20), 8, 6.0, rng)
+		_zap_time = 0.15
+
+
+## The Remote Control relic: freeze every enemy for a few seconds.
+func _use_remote() -> void:
+	remote_cooldown = 20.0
+	for enemy in get_tree().get_nodes_in_group("enemies"):
+		if "frozen" in enemy:
+			enemy.frozen = 3.0
+	var level_root := get_tree().current_scene
+	if level_root.has_method("on_remote_used"):
+		level_root.on_remote_used()
 
 
 func _shard_count() -> int:
