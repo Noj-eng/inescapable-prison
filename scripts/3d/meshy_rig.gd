@@ -11,13 +11,17 @@ var model: Node3D
 var skel: Skeleton3D
 var anim: AnimationPlayer
 var bones := {}            # "arm_r", "fore_r", "hand_r", "arm_l", ..., "spine", "hips"
-var move_clip := ""
+var move_clip := ""        # the walk clip (also used for the standing pose)
+var run_clip := ""         # from <name>_run.glb, when that file is there
+var walk_pace := 1.4       # metres per second the walk clip was made for
+var run_pace := 3.6        # ...and the run clip
 var stand_time := 0.0
 var overlay: StandardMaterial3D
 var freeze_legs := false   # one-wheel robot: its "legs" are the wheel, never bend them
 var _leg_bones: Array[int] = []
 var _hips_rest := Vector3.ZERO
 static var _announced: Array[String] = []
+static var _run_cache := {}
 
 
 ## Finds res://models/<name>, ignoring upper/lower case (Windows doesn't care
@@ -37,7 +41,31 @@ static func find(file_name: String) -> String:
 static func load_into(parent: Node3D, path: String, height: float) -> RefCounted:
 	var rig = load("res://scripts/3d/meshy_rig.gd").new()
 	rig._load(parent, path, height)
+	# Meshy exports walking and running as separate files: borrow the run
+	# clip from e.g. victor_run.glb if it sits next to victor.glb
+	var run_path := find(path.get_file().get_basename() + "_run.glb")
+	if run_path != "":
+		rig._add_run_clip(run_path)
 	return rig
+
+
+func _add_run_clip(path: String) -> void:
+	if not anim:
+		return
+	if not _run_cache.has(path):
+		# load each run file once, however many guards use it
+		var other: Node = (load(path) as PackedScene).instantiate()
+		var players := other.find_children("*", "AnimationPlayer", true, false)
+		if players.size() > 0 and players[0].get_animation_list().size() > 0:
+			var src: AnimationPlayer = players[0]
+			var a: Animation = src.get_animation(src.get_animation_list()[0]).duplicate()
+			a.loop_mode = Animation.LOOP_LINEAR
+			_run_cache[path] = a
+			print("Meshy run clip loaded: ", path)
+		other.free()
+	if _run_cache.has(path):
+		anim.get_animation_library("").add_animation("Run", _run_cache[path])
+		run_clip = "Run"
 
 
 func _load(parent: Node3D, path: String, height: float) -> void:
@@ -59,6 +87,10 @@ func _load(parent: Node3D, path: String, height: float) -> void:
 	if box.size.y > 0.01:
 		var s := height / box.size.y
 		model.scale = Vector3.ONE * s
+		# Mixamo clips are made for a ~1.7 m person: a bigger body covers
+		# more ground per step
+		walk_pace = 1.4 * height / 1.7
+		run_pace = 3.6 * height / 1.7
 		model.position.y = -box.position.y * s
 	# a see-through white layer over every mesh, for the hit flash
 	overlay = StandardMaterial3D.new()
@@ -108,12 +140,20 @@ func _pick_stand_time() -> void:
 			stand_time = t
 
 
-func update(delta: float, moving: bool, speed := 1.0) -> void:
+## ground_speed: how fast the body is really moving, in metres per second.
+## Picks walk or run and plays it at the matching pace so feet don't slide.
+func update(delta: float, moving: bool, ground_speed := 0.0) -> void:
 	if anim and move_clip != "":
-		if moving:
-			anim.speed_scale = speed
+		if moving and ground_speed > 0.05:
+			var use_run := run_clip != ""   # after the quake everyone runs (Jon)
+			var clip := run_clip if use_run else move_clip
+			if anim.current_animation != clip:
+				anim.play(clip, 0.12)
+			anim.speed_scale = clampf(ground_speed / (run_pace if use_run else walk_pace), 0.4, 2.5)
 			anim.advance(delta)
 		else:
+			if anim.current_animation != move_clip:
+				anim.play(move_clip)
 			anim.seek(stand_time, true)
 	if skel and freeze_legs:
 		for i in _leg_bones:

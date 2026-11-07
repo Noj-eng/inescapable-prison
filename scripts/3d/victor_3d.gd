@@ -12,7 +12,8 @@ const Look := preload("res://scripts/3d/look_3d.gd")
 const ARC_SHADER := preload("res://shaders/punch_arc_3d.gdshader")
 const MeshyRig := preload("res://scripts/3d/meshy_rig.gd")
 const HEIGHT := 2.2               # metres: Victor is a big man
-const SPEED := 4.2
+const Tune := preload("res://scripts/3d/tuning_3d.gd")
+const SPEED := Tune.VICTOR_SPEED
 const PUNCH_REACH := 1.9
 const PUNCH_ARC := 0.5            # cos(60 degrees) -> 120-degree arc
 const PUNCH_COOLDOWN := 0.24
@@ -281,7 +282,7 @@ func _physics_process(delta: float) -> void:
 	if punching and _punch_cooldown <= 0.0:
 		_punch()
 
-	var speed := SPEED * (0.5 if _punch_time > 0.0 else 1.0)
+	var speed := SPEED * (Tune.VICTOR_PUNCH_SLOWDOWN if _punch_time > 0.0 else 1.0)
 	var flat := move * speed + _knock
 	_knock = _knock.move_toward(Vector3.ZERO, 30.0 * delta)
 	velocity = Vector3(flat.x, velocity.y, flat.z)
@@ -301,7 +302,7 @@ func _physics_process(delta: float) -> void:
 
 func _animate(walking: bool) -> void:
 	if _mrig:
-		_mrig.update(get_physics_process_delta_time(), walking, 1.15)
+		_mrig.update(get_physics_process_delta_time(), walking, Vector2(velocity.x, velocity.z).length())
 		# the punch: throw the arm forward, twist the shoulders into it
 		var pk := 1.0 - _punch_time / PUNCH_ANIM if _punch_time > 0.0 else 0.0
 		var throw := sin(pk * PI) if _punch_time > 0.0 else 0.0

@@ -7,6 +7,7 @@ extends Node3D
 ##
 ## Run it by opening scenes/cellblock_3d.tscn and pressing F6.
 
+const Tune := preload("res://scripts/3d/tuning_3d.gd")
 const Look := preload("res://scripts/3d/look_3d.gd")
 const VictorScript := preload("res://scripts/3d/victor_3d.gd")
 const GuardScript := preload("res://scripts/3d/guard_3d.gd")
@@ -33,6 +34,9 @@ var _fade_walls: Array[MeshInstance3D] = []
 var _red_lights: Array[OmniLight3D] = []
 var _glass_lights: Array[OmniLight3D] = []
 var _shake := 0.0
+var _lamps: Array[SpotLight3D] = []
+var _aftershock_in := 6.0
+var _quake := 0.0
 var _t := 0.0
 var _rng := RandomNumberGenerator.new()
 var _lift_mat: StandardMaterial3D
@@ -358,6 +362,7 @@ func _overhead_lamps() -> void:
 			spot.position = at + Vector3(0, 5.6, 0)
 			spot.rotation_degrees = Vector3(-90, 0, 0)
 			add_child(spot)
+			_lamps.append(spot)
 			count += 1
 			# the fixture itself, hanging on a cable out of the dark
 			Look.box(self, Vector3(0.7, 0.15, 0.3), at + Vector3(0, 5.75, 0), Look.steel(Color("2a2c31")))
@@ -583,6 +588,16 @@ func _process(delta: float) -> void:
 	focus = focus.lerp(goal, minf(1.0, delta * 6.0)) if _t >= 0.1 else goal
 	camera.global_position = focus + offset
 	camera.look_at(focus, Vector3.UP)
+	# aftershocks: the quake that freed Victor isn't finished
+	_aftershock_in -= delta
+	if _aftershock_in <= 0.0 and not _game_over:
+		_aftershock_in = _rng.randf_range(Tune.AFTERSHOCK_MIN_GAP, Tune.AFTERSHOCK_MAX_GAP)
+		_quake = 1.4
+		shake(Tune.AFTERSHOCK_SHAKE)
+	_quake = maxf(0.0, _quake - delta)
+	for i in _lamps.size():
+		var flicker := _quake > 0.0 and _rng.randf() < 0.35 + 0.1 * (i % 3)
+		_lamps[i].light_energy = 14.0 * (0.12 if flicker else 1.0)
 	_shake = move_toward(_shake, 0.0, delta * 1.5)
 	camera.h_offset = _rng.randf_range(-1, 1) * _shake
 	camera.v_offset = _rng.randf_range(-1, 1) * _shake

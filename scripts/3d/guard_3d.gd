@@ -11,12 +11,13 @@ extends CharacterBody3D
 signal defeated(at: Vector3)
 
 const Look := preload("res://scripts/3d/look_3d.gd")
-const WAKE_DISTANCE := 10.0
+const Tune := preload("res://scripts/3d/tuning_3d.gd")
+const WAKE_DISTANCE := Tune.GUARD_WAKE_DISTANCE
 const GUARD_HEIGHT := 1.95
 const MeshyRig := preload("res://scripts/3d/meshy_rig.gd")
 const ROBOT_HEIGHT := 2.5          # metres: a head taller than Victor
 const SWING_RANGE := 1.5
-const SWING_WINDUP := 0.55
+const SWING_WINDUP := Tune.ROBOT_SWING_WINDUP
 const SWING_STRIKE := 0.12
 const SWING_RECOVER := 0.5
 
@@ -24,7 +25,7 @@ var kind := "guard"   # "guard" or "robot"
 var target: Node3D
 var hp := 3.0
 var active := false
-var speed := 2.6
+var speed := Tune.GUARD_SPEED
 
 var _knock := Vector3.ZERO
 var _flash := 0.0
@@ -74,7 +75,7 @@ func _ready() -> void:
 	add_child(_body)
 	if kind == "robot":
 		hp = 4.0
-		speed = 2.4
+		speed = Tune.ROBOT_SPEED
 		cap.radius = 0.45
 		cap.height = 2.2
 		shape.position.y = 1.1
@@ -421,7 +422,7 @@ func _physics_process(delta: float) -> void:
 		_body.rotation.z = sin(_t * 2.3) * 0.035
 		_pose_arms()
 	elif _mrig:
-		_mrig.update(delta, move != Vector3.ZERO, speed / 1.6)
+		_mrig.update(delta, move != Vector3.ZERO, Vector2(velocity.x, velocity.z).length())
 	else:
 		_body.position.y = absf(sin(_walk)) * 0.04
 		_body.rotation.z = sin(_walk) * 0.05
