@@ -368,7 +368,7 @@ func _physics_process(delta: float) -> void:
 		var to := target.global_position - global_position
 		to.y = 0
 		var level := get_tree().current_scene
-		if not active and to.length() < WAKE_DISTANCE and (not level.has_method("path_length") or level.path_length(global_position, target.global_position) < 9):
+		if not active and not level.get("calm") and to.length() < WAKE_DISTANCE and (not level.has_method("path_length") or level.path_length(global_position, target.global_position) < 9):
 			active = true
 		if active:
 			_repath -= delta

@@ -18,3 +18,14 @@ const ROBOT_SWING_WINDUP := 0.45   # seconds the baton is raised before it falls
 const AFTERSHOCK_MIN_GAP := 8.0    # seconds between tremors, at least...
 const AFTERSHOCK_MAX_GAP := 15.0   # ...and at most
 const AFTERSHOCK_SHAKE := 0.45     # camera shake strength
+
+# --- Procedural prison floors -----------------------------------------------------
+const LEVEL_PROCEDURAL := true     # false = the hand-made Cell Block C map
+const LEVEL_SEED := 0              # 0 = a new prison every run; any other number = the same layout every time
+const LEVEL_BLOCKS_X := 7          # floor size in room-blocks across (each about 26 m)
+const LEVEL_BLOCKS_Y := 6          # ...and down
+const LEVEL_WINDING := 0.7         # 0 = many shortcuts, 1 = one long winding route
+const ENEMY_DENSITY := 2.8         # guards/robots per room, on average
+const ROBOT_SHARE := 0.25          # fraction of enemies that are robots
+const CALM_RADIUS := 4.0           # metres Victor can move from the start before the alarm goes off
+const ALARM_RADIUS := 60.0         # the alarm sends every enemy within this many metres after him

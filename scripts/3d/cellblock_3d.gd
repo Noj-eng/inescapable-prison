@@ -1,5 +1,7 @@
 extends Node3D
-## 3D TEST: Cell Block C rebuilt in 3D from the same text map as the 2D game,
+## 3D TEST: a prison floor in 3D, built from a text map. By default the map is
+## made fresh by prison_gen.gd (see tuning_3d.gd); the hand-made Cell Block C
+## map below is the fallback. Originally rebuilt from the same text map as the 2D game,
 ## in the gritty look of Jon's concept art: cracked concrete, electrified
 ## glass cells, red caged warning lights, steam grates, a catwalk edge over
 ## a dark drop, loose cables and rubble, real lights, shadows, fog and SSAO.
@@ -8,10 +10,52 @@ extends Node3D
 ## Run it by opening scenes/cellblock_3d.tscn and pressing F6.
 
 const Tune := preload("res://scripts/3d/tuning_3d.gd")
+const PrisonGen := preload("res://scripts/3d/prison_gen.gd")
+const LIGHT_RANGE := 30.0   # metres around Victor where lamps are switched on
 const Look := preload("res://scripts/3d/look_3d.gd")
 const VictorScript := preload("res://scripts/3d/victor_3d.gd")
 const GuardScript := preload("res://scripts/3d/guard_3d.gd")
-const GameScript := preload("res://scripts/main.gd")
+## The 3D Cell Block C: about twice the size of the 2D one, built for running.
+## # wall  . floor  b bunk  t toilet  B electrified glass cell front
+## R Victor's broken rig (start)  E lift  G guard  M robot  o pillar
+## v steam grate  x crate  d table  c console
+const MAP := [
+	"################################################",
+	"#b..#b..#b..#b..#b..#b..#b..#b..#b..#b..#b..####",
+	"#...#...#...#...#...#...#...#...#...#...#...####",
+	"#t..#t..#t..#t..#t..#t..#t..#t..#t..#t..#t..####",
+	"#BBB#BBB#B.B#BBB#BBB#BBB#BBB#BBB#BBB#BBB#BBB####",
+	"#..............................................#",
+	"#................v............G.............xx.#",
+	"#...........o.........o.........o.........o..x.#",
+	"#.....R...................G....................#",
+	"#...................................G.......G..#",
+	"#.................G..................v.........#",
+	"#..d.....d..o.........o.........o........Mo....#",
+	"#..........................v...................#",
+	"#####...###############..###############...#####",
+	"#####...###############..###############...#####",
+	"#............######################............#",
+	"#..cc....c...##b..#b..#b..#b..#b..#...xx...xx..#",
+	"#....G.......##...#...#...#...#...#...x.....x..#",
+	"#.....o......##t..#t..#t..#t..#t..#.....G......#",
+	"#.............#BBB#BBB#BBB#BBB#BBB#.......v....#",
+	"#..................................#........M..#",
+	"#..d....d....#......G..........G...#....xx.....#",
+	"#......M.....#..............G................x.#",
+	"#.........G..#..........M..........#..G......x.#",
+	"#............#.....................#...........#",
+	"####...###########....###########..#########..##",
+	"#..............................................#",
+	"#..xx...............xx........G................#",
+	"#.......G......v....x....................M.....#",
+	"#.........o.............o.............o........#",
+	"#.....v...............M....xx.......G..........#",
+	"#.............G...............v...........G.E..#",
+	"#..............................................#",
+	"################################################",
+]
+
 const GLASS_SHADER := preload("res://shaders/electric_glass.gdshader")
 const ChromaLabelScript := preload("res://scripts/chroma_label.gd")
 const NeonBarScript := preload("res://scripts/neon_bar.gd")
@@ -34,6 +78,13 @@ var _fade_walls: Array[MeshInstance3D] = []
 var _red_lights: Array[OmniLight3D] = []
 var _glass_lights: Array[OmniLight3D] = []
 var _shake := 0.0
+var _lift_at := Vector3.INF
+var _descending := false
+var _cull_t := 0.0
+var calm := true            # nobody moves until Victor leaves the start
+var _start_at := Vector3.ZERO
+var _alarm := 0.0
+static var depth := 1      # how many floors deep Victor is (survives reloads)
 var _lamps: Array[SpotLight3D] = []
 var _aftershock_in := 6.0
 var _quake := 0.0
@@ -51,15 +102,22 @@ var _over_panel: ColorRect
 
 
 func _ready() -> void:
-	_rng.seed = 1977
-	map = GameScript.LEVELS[0]["map"]
+	if Tune.LEVEL_PROCEDURAL:
+		var seed_value := Tune.LEVEL_SEED + depth if Tune.LEVEL_SEED != 0 else randi()
+		map = PrisonGen.new().generate(seed_value, Tune.LEVEL_BLOCKS_X, Tune.LEVEL_BLOCKS_Y,
+				Tune.LEVEL_WINDING, Tune.ENEMY_DENSITY, Tune.ROBOT_SHARE)
+		print("Prison floor %d, seed %d" % [depth, seed_value])
+		_rng.seed = seed_value
+	else:
+		map = MAP
+		_rng.seed = 1977
 	rows = map.size()
 	cols = map[0].length()
 	_build_environment()
 	_build_level()
 	_build_paths()
 	_build_hud()
-	_say("CELL BLOCK C  //  3D TEST\nWASD to move.  Click, Space or J to punch.", Color("ffd23f"), 4.0)
+	_say("%s\nWASD to move.  Click, Space or J to punch.  Find the lift." % _title(), Color("ffd23f"), 4.0)
 
 
 func cell_pos(x: float, y: float) -> Vector3:
@@ -153,6 +211,8 @@ func _build_level() -> void:
 				slab.rotation = Vector3(_rng.randf_range(-0.01, 0.01), 0, _rng.randf_range(-0.01, 0.01))
 			match ch:
 				"#":
+					if not _touches_floor(x, y):
+						continue    # solid rock between rooms: nothing to see or touch
 					if front:
 						_catwalk_edge(x, y)
 					else:
@@ -171,38 +231,43 @@ func _build_level() -> void:
 				"c": _console(at)
 				"o": _pillar(at)
 				"v": _grate(at)
-				"E": _lift(at)
+				"E":
+					_lift(at)
+					_lift_at = at
 				"R":
 					_broken_rig(at)
 					start = at + Vector3(0, 0, CELL)
 				"G", "M":
 					_spawn_enemy("robot" if ch == "M" else "guard", at)
-			if ch == "." and y == 4 and _ch(x - 1, y) == "B" and _ch(x + 1, y) == "B":
+			if ch == "." and _ch(x - 1, y) == "B" and _ch(x + 1, y) == "B":
 				_smashed_glass(at)   # cell 7: the quake already blew this one out
-	# lintels and cell numbers above the glass fronts
-	var x0 := 1
-	while x0 < cols:
-		if _ch(x0, 4) == "B":
-			var x1 := x0
-			while _ch(x1 + 1, 4) != "#":
-				x1 += 1
-			var mid := (x0 + x1) * 0.5
-			Look.box(self, Vector3((x1 - x0 + 1) * CELL, WALL_H - 2.5, CELL), cell_pos(mid, 4) + Vector3(0, 2.5 + (WALL_H - 2.5) * 0.5, 0), wall_mat)
-			var label := Label3D.new()
-			label.text = str(cell_number)
-			cell_number += 1
-			label.font_size = 160
-			label.pixel_size = 0.004
-			label.modulate = Color(0.1, 0.1, 0.1, 0.9)
-			label.outline_size = 0
-			label.shaded = true
-			label.position = cell_pos(mid, 4) + Vector3(0, 2.85, CELL * 0.5 + 0.01)
-			add_child(label)
-			# red caged warning lights either side of the cell
-			for side: int in [-1, 1]:
-				_red_caged_light(cell_pos((x0 if side < 0 else x1) + 0.5 * side, 4) + Vector3(0, 2.0, CELL * 0.5 + 0.12))
-			x0 = x1 + 1
-		x0 += 1
+	# lintels and cell numbers above every row of glass fronts
+	for gy in rows:
+		if not (map[gy] as String).contains("B"):
+			continue
+		var x0 := 1
+		while x0 < cols:
+			if _ch(x0, gy) == "B":
+				var x1 := x0
+				while _ch(x1 + 1, gy) != "#":
+					x1 += 1
+				var mid := (x0 + x1) * 0.5
+				Look.box(self, Vector3((x1 - x0 + 1) * CELL, WALL_H - 2.5, CELL), cell_pos(mid, gy) + Vector3(0, 2.5 + (WALL_H - 2.5) * 0.5, 0), wall_mat)
+				var label := Label3D.new()
+				label.text = str(cell_number)
+				cell_number += 1
+				label.font_size = 160
+				label.pixel_size = 0.004
+				label.modulate = Color(0.1, 0.1, 0.1, 0.9)
+				label.outline_size = 0
+				label.shaded = true
+				label.position = cell_pos(mid, gy) + Vector3(0, 2.85, CELL * 0.5 + 0.01)
+				add_child(label)
+				# red caged warning lights either side of the cell
+				for side: int in [-1, 1]:
+					_red_caged_light(cell_pos((x0 if side < 0 else x1) + 0.5 * side, gy) + Vector3(0, 2.0, CELL * 0.5 + 0.12))
+				x0 = x1 + 1
+			x0 += 1
 	_overhead_lamps()
 	_scatter_cracks_rubble_cables()
 	_the_drop()
@@ -211,6 +276,7 @@ func _build_level() -> void:
 	player.set_script(VictorScript)
 	player.camera = camera
 	player.position = start + Vector3(0, 0.1, 0)
+	_start_at = start
 	add_child(player)
 	player.health_changed.connect(_on_health_changed)
 	player.died.connect(_on_player_died)
@@ -573,6 +639,12 @@ func path_length(from: Vector3, to: Vector3) -> int:
 
 # --- every frame ------------------------------------------------------------------
 
+func _title() -> String:
+	if Tune.LEVEL_PROCEDURAL:
+		return "THE PRISON  //  FLOOR -%d" % depth
+	return "CELL BLOCK C  //  3D TEST"
+
+
 func shake(amount: float) -> void:
 	_shake = maxf(_shake, amount)
 
@@ -599,11 +671,42 @@ func _process(delta: float) -> void:
 		var flicker := _quake > 0.0 and _rng.randf() < 0.35 + 0.1 * (i % 3)
 		_lamps[i].light_energy = 14.0 * (0.12 if flicker else 1.0)
 	_shake = move_toward(_shake, 0.0, delta * 1.5)
+	# a moment to get his bearings; a few steps out and the alarm goes off
+	if calm and not _game_over:
+		var from_start := player.global_position - _start_at
+		from_start.y = 0
+		if from_start.length() > Tune.CALM_RADIUS:
+			calm = false
+			_alarm = 3.0
+			shake(0.2)
+			_say("ALARM.\nEvery guard on the floor knows where you are.", Color("ff3b3b"), 2.5)
+			for e in get_tree().get_nodes_in_group("enemies"):
+				if e.global_position.distance_to(player.global_position) < Tune.ALARM_RADIUS:
+					e.active = true
+	_alarm = maxf(0.0, _alarm - delta)
+	# only light what's near Victor: a big floor has hundreds of lamps
+	_cull_t -= delta
+	if _cull_t <= 0.0:
+		_cull_t = 0.25
+		var here := player.global_position
+		for group in [_lamps, _red_lights, _glass_lights]:
+			for l: Light3D in group:
+				l.visible = l.global_position.distance_squared_to(here) < LIGHT_RANGE * LIGHT_RANGE
+	# the lift: step on it to drop to a deeper, freshly built floor
+	if _lift_at != Vector3.INF and not _descending and not _game_over:
+		var to_lift := player.global_position - _lift_at
+		to_lift.y = 0
+		if to_lift.length() < 1.1:
+			_descending = true
+			depth += 1
+			shake(0.3)
+			_say("GOING DOWN.\nFloor -%d. Still no way out." % depth, Color("ff7a4a"), 2.0)
+			get_tree().create_timer(1.6).timeout.connect(get_tree().reload_current_scene)
 	camera.h_offset = _rng.randf_range(-1, 1) * _shake
 	camera.v_offset = _rng.randf_range(-1, 1) * _shake
 	# red warning lights pulse, the containment glass flickers
 	for i in _red_lights.size():
-		_red_lights[i].light_energy = 1.2 + 1.0 * (0.5 + 0.5 * sin(_t * 3.0 + i))
+		_red_lights[i].light_energy = 1.2 + 1.0 * (0.5 + 0.5 * sin(_t * 3.0 + i)) + (3.0 if _alarm > 0.0 and fmod(_t, 0.4) < 0.2 else 0.0)
 	for i in _glass_lights.size():
 		_glass_lights[i].light_energy = 0.9 + _rng.randf() * 0.9
 	# walls and pillars between the camera and Victor turn see-through
@@ -630,7 +733,7 @@ func _on_enemy_defeated(_at: Vector3) -> void:
 	if enemies_left == 0:
 		_lift_mat.albedo_color = Color(0.3, 1.0, 0.5)
 		_lift_mat.emission = Color(0.3, 1.0, 0.5)
-		_say("CELL BLOCK C CLEAR.\nThat's the end of the 3D test.", Color("4dff88"), 5.0)
+		_say("FLOOR CLEAR.\nNot a guard left standing.", Color("4dff88"), 4.0)
 
 
 func _on_health_changed(hp: int, max_hp: int) -> void:
@@ -648,7 +751,7 @@ func _on_player_died() -> void:
 func _build_hud() -> void:
 	_hud = CanvasLayer.new()
 	add_child(_hud)
-	_chroma("CELL BLOCK C  //  3D TEST", Vector2(28, 20), Vector2(600, 30), 20, Color("ffd23f"))
+	_chroma(_title(), Vector2(28, 20), Vector2(600, 30), 20, Color("ffd23f"))
 	_chroma("MOVE [WASD]   PUNCH [CLICK/SPACE]", Vector2(28, 48), Vector2(600, 20), 12, Color(0.62, 0.7, 0.82, 0.75))
 	_chroma("VITALS", Vector2(28, 76), Vector2(200, 16), 11, Color(0.62, 0.7, 0.82, 0.75))
 	_health_bar = Control.new()
