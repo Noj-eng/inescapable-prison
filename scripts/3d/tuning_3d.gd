@@ -52,3 +52,13 @@ const GRENADE_FUSE := 1.3          # seconds a grenade blinks before it goes off
 const GRENADE_RADIUS := 2.8
 const TURRET_CHANCE := 0.3         # chance a hall gets a wall turret (guard posts: double)
 const TURRET_HP := 7.0
+
+# --- Powerups (what they look like is in scripts/3d/powerup_3d.gd) ----------------
+const POWERUPS_PER_FLOOR := 14     # scattered through the rooms of each floor
+const POWERUP_DROP_CHANCE := 0.1   # chance a beaten enemy drops one
+const MEDKIT_HEAL := 4             # health a med kit gives back (Victor has 10)
+const KNUCKLES_TIME := 12.0        # seconds of double-damage punches
+const COFFEE_TIME := 10.0          # seconds of extra speed...
+const COFFEE_SPEED := 1.4          # ...this many times faster
+const MATTRESS_HITS := 3           # hits the mattress armour soaks
+const HOOCH_TIME := 8.0            # seconds of rage

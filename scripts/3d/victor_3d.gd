@@ -34,6 +34,13 @@ var _punch_side := 1
 var _hurt := 0.0
 var _invulnerable := 0.0
 var _slow_t := 0.0                # seconds left of being slowed (taser darts, shocks)
+# powerups (scripts/3d/powerup_3d.gd): seconds left on each, and armour hits left
+var knuckles_t := 0.0
+var coffee_t := 0.0
+var rage_t := 0.0
+var armour := 0
+var _armour_shell: MeshInstance3D
+var _armour_mat: StandardMaterial3D
 var _walk := 0.0
 var _t := 0.0
 
@@ -78,6 +85,23 @@ func _ready() -> void:
 		_load_model()
 	else:
 		_build_stand_in()
+
+	# a see-through blue shell while Mattress Armour is soaking hits
+	_armour_shell = MeshInstance3D.new()
+	var shell := SphereMesh.new()
+	shell.radius = 0.95
+	shell.height = HEIGHT * 1.1
+	_armour_shell.mesh = shell
+	_armour_mat = StandardMaterial3D.new()
+	_armour_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_armour_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_armour_mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	_armour_mat.albedo_color = Color(0.35, 0.7, 1.0, 0.12)
+	_armour_shell.material_override = _armour_mat
+	_armour_shell.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_armour_shell.position.y = HEIGHT * 0.5
+	_armour_shell.visible = false
+	add_child(_armour_shell)
 
 	_swipe = MeshInstance3D.new()
 	_swipe.mesh = _arc_mesh()
@@ -143,11 +167,50 @@ func _build_stand_in() -> void:
 # --- combat --------------------------------------------------------------------
 
 func slow(seconds: float) -> void:
+	if rage_t > 0.0:
+		return             # hooch: too angry to notice
 	_slow_t = maxf(_slow_t, seconds)
+
+
+## Picking up a powerup (see powerup_3d.gd for what each one is).
+func power_up(kind: String) -> void:
+	match kind:
+		"medkit":
+			hp = mini(max_hp, hp + Tune.MEDKIT_HEAL)
+			health_changed.emit(hp, max_hp)
+		"knuckles":
+			knuckles_t = Tune.KNUCKLES_TIME
+		"coffee":
+			coffee_t = Tune.COFFEE_TIME
+		"mattress":
+			armour = Tune.MATTRESS_HITS
+		"hooch":
+			rage_t = Tune.HOOCH_TIME
+			_slow_t = 0.0
+
+
+## What's active right now, for the HUD: e.g. "KNUCKLES 8  ARMOUR x2".
+func buff_text() -> String:
+	var parts: Array[String] = []
+	if knuckles_t > 0.0: parts.append("KNUCKLES %d" % ceili(knuckles_t))
+	if coffee_t > 0.0: parts.append("COFFEE %d" % ceili(coffee_t))
+	if rage_t > 0.0: parts.append("RAGE %d" % ceili(rage_t))
+	if armour > 0: parts.append("ARMOUR x%d" % armour)
+	return "   ".join(parts)
 
 
 func hit(from: Vector3, damage := 1, force := 6.0) -> void:
 	if dead or _invulnerable > 0.0:
+		return
+	if armour > 0:
+		# the mattress takes it: a light shove and no damage
+		armour -= 1
+		var push := global_position - from
+		push.y = 0
+		_knock = push.normalized() * force * 0.4
+		_invulnerable = 0.5
+		_armour_mat.albedo_color.a = 0.6
+		_shake(0.1)
 		return
 	hp = maxi(0, hp - damage)
 	health_changed.emit(hp, max_hp)
@@ -178,7 +241,13 @@ func _punch() -> void:
 	_combo_timer = 0.55
 	_knock += facing * 3.0     # small lunge forward
 
-	var reach := PUNCH_REACH * (1.25 if heavy else 1.0)
+	var raging := rage_t > 0.0
+	if raging:
+		_punch_cooldown *= 0.8
+	var reach := PUNCH_REACH * (1.25 if heavy else 1.0) * (1.4 if raging else 1.0)
+	var arc := 0.26 if raging else PUNCH_ARC          # rage: a 150-degree arc
+	var power := (2.0 if heavy else 1.0) * (2.0 if knuckles_t > 0.0 else 1.0)
+	var force := (9.0 if heavy else 5.5) * (1.8 if raging else 1.0)
 	_start_swipe(reach, heavy)
 	var landed := false
 	# "breakables": things he can smash, like the armory vault doors
@@ -186,8 +255,8 @@ func _punch() -> void:
 		var d: Vector3 = enemy.global_position - global_position
 		d.y = 0
 		var dist := d.length()
-		if dist < reach + 0.4 and (dist < 0.5 or d.normalized().dot(facing) > PUNCH_ARC):
-			enemy.take_hit(global_position, 2.0 if heavy else 1.0, 9.0 if heavy else 5.5)
+		if dist < reach + 0.4 and (dist < 0.5 or d.normalized().dot(facing) > arc):
+			enemy.take_hit(global_position, power, force)
 			landed = true
 	if landed:
 		_shake(0.18 if heavy else 0.08)
@@ -234,7 +303,12 @@ func _start_swipe(reach: float, heavy: bool) -> void:
 	_swipe.basis = Basis.looking_at(-facing, Vector3.UP).scaled(Vector3.ONE * (reach + 0.3))
 	_swipe_mat.set_shader_parameter("sweep_dir", float(_punch_side))
 	_swipe_mat.set_shader_parameter("heavy", 1.0 if heavy else 0.0)
-	_swipe_mat.set_shader_parameter("tint", Color(1.0, 0.62, 0.3) if heavy else Color(0.75, 0.95, 1.0))
+	var tint := Color(1.0, 0.62, 0.3) if heavy else Color(0.75, 0.95, 1.0)
+	if knuckles_t > 0.0:
+		tint = Color(1.0, 0.82, 0.3)
+	if rage_t > 0.0:
+		tint = Color(0.55, 1.0, 0.3)
+	_swipe_mat.set_shader_parameter("tint", tint)
 	_swipe_mat.set_shader_parameter("progress", 0.0)
 
 
@@ -272,6 +346,11 @@ func _physics_process(delta: float) -> void:
 	_hurt = maxf(0.0, _hurt - delta)
 	_invulnerable = maxf(0.0, _invulnerable - delta)
 	_slow_t = maxf(0.0, _slow_t - delta)
+	knuckles_t = maxf(0.0, knuckles_t - delta)
+	coffee_t = maxf(0.0, coffee_t - delta)
+	rage_t = maxf(0.0, rage_t - delta)
+	_armour_shell.visible = armour > 0 and not dead
+	_armour_mat.albedo_color.a = move_toward(_armour_mat.albedo_color.a, 0.08 + 0.04 * armour, delta * 2.0)
 	_punch_time = maxf(0.0, _punch_time - delta)
 	_punch_cooldown = maxf(0.0, _punch_cooldown - delta)
 	_combo_timer = maxf(0.0, _combo_timer - delta)
@@ -297,7 +376,8 @@ func _physics_process(delta: float) -> void:
 	if punching and _punch_cooldown <= 0.0:
 		_punch()
 
-	var speed := SPEED * (Tune.VICTOR_PUNCH_SLOWDOWN if _punch_time > 0.0 else 1.0) * (0.5 if _slow_t > 0.0 else 1.0)
+	var speed := SPEED * (Tune.VICTOR_PUNCH_SLOWDOWN if _punch_time > 0.0 else 1.0) * (0.5 if _slow_t > 0.0 else 1.0) \
+			* (Tune.COFFEE_SPEED if coffee_t > 0.0 else 1.0)
 	var flat := move * speed + _knock
 	_knock = _knock.move_toward(Vector3.ZERO, 30.0 * delta)
 	velocity = Vector3(flat.x, velocity.y, flat.z)
@@ -332,6 +412,8 @@ func _animate(walking: bool) -> void:
 			_mrig.turn("fore_r", Vector3.RIGHT, -0.5 * (1.0 - throw))
 		if _hurt > 0.0:
 			_mrig.flash(_hurt * 3.0, Color(1, 0.2, 0.15))
+		elif rage_t > 0.0:
+			_mrig.flash(0.18 + 0.1 * sin(_t * 12.0), Color(0.5, 1.0, 0.3))
 		else:
 			_mrig.flash(0.3 + 0.15 * sin(_t * 20.0) if _slow_t > 0.0 else 0.0, Color(0.3, 0.9, 1.0))
 		return

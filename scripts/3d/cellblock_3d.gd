@@ -13,6 +13,7 @@ const Tune := preload("res://scripts/3d/tuning_3d.gd")
 const PrisonGen := preload("res://scripts/3d/prison_gen.gd")
 const Themes := preload("res://scripts/3d/themes_3d.gd")
 const Types := preload("res://scripts/3d/enemy_types_3d.gd")
+const Powerup := preload("res://scripts/3d/powerup_3d.gd")
 const LIGHT_RANGE := 30.0   # metres around Victor where lamps are switched on
 const Look := preload("res://scripts/3d/look_3d.gd")
 const VictorScript := preload("res://scripts/3d/victor_3d.gd")
@@ -101,6 +102,8 @@ var _game_over := false
 var _hud: CanvasLayer
 var _health_bar: Control
 var _hostiles: Control
+var _buffs: Control
+var _buff_text := ""
 var _message: Control
 var _message_tween: Tween
 var _over_panel: ColorRect
@@ -126,6 +129,7 @@ func _ready() -> void:
 	_build_environment()
 	_build_level()
 	_build_paths()
+	Powerup.scatter(self, map, _rng, Tune.POWERUPS_PER_FLOOR, CELL, _start_at)
 	_build_hud()
 	_say("%s\nWASD to move.  Click, Space or J to punch.  Find the lift." % _title(), Color("ffd23f"), 4.0)
 
@@ -718,6 +722,11 @@ func _process(delta: float) -> void:
 				if e.global_position.distance_to(player.global_position) < Tune.ALARM_RADIUS:
 					e.active = true
 	_alarm = maxf(0.0, _alarm - delta)
+	# active powerups under the health bar
+	var bt: String = player.buff_text()
+	if bt != _buff_text:
+		_buff_text = bt
+		_buffs.text = bt
 	# only light what's near Victor: a big floor has hundreds of lamps
 	_cull_t -= delta
 	if _cull_t <= 0.0:
@@ -761,8 +770,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_tree().reload_current_scene()
 
 
-func _on_enemy_defeated(_at: Vector3) -> void:
+func _on_enemy_defeated(at: Vector3) -> void:
 	enemies_left -= 1
+	Powerup.drop(self, at, _rng)
 	_hostiles.text = "HOSTILES  %02d / %02d" % [enemies_left, total_enemies]
 	if enemies_left == 0:
 		_lift_mat.albedo_color = Color(0.3, 1.0, 0.5)
@@ -795,6 +805,7 @@ func _build_hud() -> void:
 	_health_bar.color = Color("ff3d6e")
 	_health_bar.segments = 20
 	_hud.add_child(_health_bar)
+	_buffs = _chroma("", Vector2(28, 118), Vector2(600, 18), 12, Color("ffd23f"))
 	_hostiles = _chroma("HOSTILES  %02d / %02d" % [enemies_left, total_enemies], Vector2(1068, 20), Vector2(200, 16), 11, Color("ff7a4a"))
 	_message = _chroma("", Vector2(0, 600), Vector2(1280, 90), 20, Color.WHITE)
 	for l in _message.get_children():
