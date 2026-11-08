@@ -33,6 +33,7 @@ var _combo_timer := 0.0
 var _punch_side := 1
 var _hurt := 0.0
 var _invulnerable := 0.0
+var _slow_t := 0.0                # seconds left of being slowed (taser darts, shocks)
 var _walk := 0.0
 var _t := 0.0
 
@@ -140,6 +141,10 @@ func _build_stand_in() -> void:
 
 
 # --- combat --------------------------------------------------------------------
+
+func slow(seconds: float) -> void:
+	_slow_t = maxf(_slow_t, seconds)
+
 
 func hit(from: Vector3, damage := 1, force := 6.0) -> void:
 	if dead or _invulnerable > 0.0:
@@ -265,6 +270,7 @@ func _physics_process(delta: float) -> void:
 	_t += delta
 	_hurt = maxf(0.0, _hurt - delta)
 	_invulnerable = maxf(0.0, _invulnerable - delta)
+	_slow_t = maxf(0.0, _slow_t - delta)
 	_punch_time = maxf(0.0, _punch_time - delta)
 	_punch_cooldown = maxf(0.0, _punch_cooldown - delta)
 	_combo_timer = maxf(0.0, _combo_timer - delta)
@@ -290,7 +296,7 @@ func _physics_process(delta: float) -> void:
 	if punching and _punch_cooldown <= 0.0:
 		_punch()
 
-	var speed := SPEED * (Tune.VICTOR_PUNCH_SLOWDOWN if _punch_time > 0.0 else 1.0)
+	var speed := SPEED * (Tune.VICTOR_PUNCH_SLOWDOWN if _punch_time > 0.0 else 1.0) * (0.5 if _slow_t > 0.0 else 1.0)
 	var flat := move * speed + _knock
 	_knock = _knock.move_toward(Vector3.ZERO, 30.0 * delta)
 	velocity = Vector3(flat.x, velocity.y, flat.z)
@@ -323,7 +329,10 @@ func _animate(walking: bool) -> void:
 		if _combo_timer > 0.0:
 			_mrig.turn("fore_l", Vector3.RIGHT, -0.5 * (1.0 - throw))
 			_mrig.turn("fore_r", Vector3.RIGHT, -0.5 * (1.0 - throw))
-		_mrig.flash(_hurt * 3.0, Color(1, 0.2, 0.15))
+		if _hurt > 0.0:
+			_mrig.flash(_hurt * 3.0, Color(1, 0.2, 0.15))
+		else:
+			_mrig.flash(0.3 + 0.15 * sin(_t * 20.0) if _slow_t > 0.0 else 0.0, Color(0.3, 0.9, 1.0))
 		return
 	# stand-in: swing legs, pump the punching arm forward, flash red when hurt
 	var swing := sin(_walk) * 0.6

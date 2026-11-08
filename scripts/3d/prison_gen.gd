@@ -24,6 +24,9 @@ var _corr := {}          # every tile a corridor runs through: kept clear
 ## blocks_x, blocks_y: size in blocks. winding: 0 = lots of shortcuts,
 ## 1 = a pure maze with one route. density: enemies per room, on average.
 ## robot_share: 0..1 of enemies that are robots.
+var turret_chance := 0.3   # chance a guard post or hall gets a turret
+
+
 func generate(seed_value: int, blocks_x: int, blocks_y: int, winding: float, density: float, robot_share: float) -> Array:
 	# build, check there's a way through, and try again if not
 	for attempt in 20:
@@ -185,9 +188,13 @@ func _dress_hall(r: Rect2i) -> void:
 				_prop(Vector2i(x, y), "o")
 	_scatter(r, "v", 2)
 	_scatter(r, "x", _rng.randi_range(0, 2))
+	if _rng.randf() < turret_chance:
+		_scatter(r, "T", 1)
 
 
 func _dress_guard_post(r: Rect2i) -> void:
+	if _rng.randf() < turret_chance * 2.0:
+		_scatter(r, "T", 1)
 	var y := r.position.y
 	for x in range(r.position.x + 1, mini(r.end.x - 1, r.position.x + 6)):
 		if _rng.randf() < 0.7:
@@ -288,7 +295,7 @@ func reachable(map: Array) -> bool:
 			var n: Vector2i = c + d
 			if seen.has(n) or n.y < 0 or n.y >= map.size() or n.x < 0 or n.x >= (map[n.y] as String).length():
 				continue
-			if "#Bbtdxoc".contains((map[n.y] as String)[n.x]):
+			if "#BbtdxocT".contains((map[n.y] as String)[n.x]):
 				continue
 			seen[n] = true
 			queue.append(n)

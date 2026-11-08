@@ -11,6 +11,7 @@ extends Node3D
 
 const Tune := preload("res://scripts/3d/tuning_3d.gd")
 const PrisonGen := preload("res://scripts/3d/prison_gen.gd")
+const Types := preload("res://scripts/3d/enemy_types_3d.gd")
 const LIGHT_RANGE := 30.0   # metres around Victor where lamps are switched on
 const Look := preload("res://scripts/3d/look_3d.gd")
 const VictorScript := preload("res://scripts/3d/victor_3d.gd")
@@ -64,7 +65,7 @@ const SCANLINES := preload("res://shaders/scanlines.gdshader")
 const CELL := 2.0           # metres per map square
 const WALL_H := 3.2         # inner walls
 const BACK_WALL_H := 5.0    # walls along the back edges
-const SOLID := "#Bbtdxoc"
+const SOLID := "#BbtdxocT"
 
 var map: Array = []
 var rows := 0
@@ -85,6 +86,7 @@ var calm := true            # nobody moves until Victor leaves the start
 var _start_at := Vector3.ZERO
 var _alarm := 0.0
 static var depth := 1      # how many floors deep Victor is (survives reloads)
+static var met := {}       # enemy types already introduced this run
 var _lamps: Array[SpotLight3D] = []
 var _aftershock_in := 6.0
 var _quake := 0.0
@@ -104,7 +106,9 @@ var _over_panel: ColorRect
 func _ready() -> void:
 	if Tune.LEVEL_PROCEDURAL:
 		var seed_value := Tune.LEVEL_SEED + depth if Tune.LEVEL_SEED != 0 else randi()
-		map = PrisonGen.new().generate(seed_value, Tune.LEVEL_BLOCKS_X, Tune.LEVEL_BLOCKS_Y,
+		var gen := PrisonGen.new()
+		gen.turret_chance = Tune.TURRET_CHANCE
+		map = gen.generate(seed_value, Tune.LEVEL_BLOCKS_X, Tune.LEVEL_BLOCKS_Y,
 				Tune.LEVEL_WINDING, Tune.ENEMY_DENSITY, Tune.ROBOT_SHARE)
 		print("Prison floor %d, seed %d" % [depth, seed_value])
 		_rng.seed = seed_value
@@ -237,6 +241,8 @@ func _build_level() -> void:
 				"R":
 					_broken_rig(at)
 					start = at + Vector3(0, 0, CELL)
+				"T":
+					_spawn_enemy("turret", at)
 				"G", "M":
 					_spawn_enemy("robot" if ch == "M" else "guard", at)
 			if ch == "." and _ch(x - 1, y) == "B" and _ch(x + 1, y) == "B":
@@ -593,6 +599,8 @@ func _spawn_enemy(kind: String, at: Vector3) -> void:
 	var e := CharacterBody3D.new()
 	e.set_script(GuardScript)
 	e.kind = kind
+	e.variant = Types.pick(kind, depth, _rng)
+	e.depth = depth
 	e.position = at + Vector3(0, 0.1, 0)
 	add_child(e)
 	e.defeated.connect(_on_enemy_defeated)
@@ -611,6 +619,21 @@ func _build_paths() -> void:
 		for x in cols:
 			if SOLID.contains(map[y][x]):
 				_astar.set_point_solid(Vector2i(x, y))
+
+
+## First time an enemy type comes for Victor, say what it does.
+func meet(variant: String) -> void:
+	if met.has(variant):
+		return
+	met[variant] = true
+	var info: Dictionary = Types.TYPES[variant]
+	if info["blurb"] != "":
+		_say("%s\n%s" % [info["name"], info["blurb"]], info["tint"].lightened(0.3), 3.0)
+
+
+func is_wall(p: Vector3) -> bool:
+	var g := _to_grid(p)
+	return _astar.is_in_boundsv(g) and map[g.y][g.x] == "#"
 
 
 func _to_grid(p: Vector3) -> Vector2i:

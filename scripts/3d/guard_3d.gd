@@ -15,13 +15,24 @@ const Tune := preload("res://scripts/3d/tuning_3d.gd")
 const WAKE_DISTANCE := Tune.GUARD_WAKE_DISTANCE
 const GUARD_HEIGHT := 1.95
 const MeshyRig := preload("res://scripts/3d/meshy_rig.gd")
+const Types := preload("res://scripts/3d/enemy_types_3d.gd")
 const ROBOT_HEIGHT := 2.5          # metres: a head taller than Victor
 const SWING_RANGE := 1.5
 const SWING_WINDUP := Tune.ROBOT_SWING_WINDUP
 const SWING_STRIKE := 0.12
 const SWING_RECOVER := 0.5
 
-var kind := "guard"   # "guard" or "robot"
+var kind := "guard"   # body: "guard" or "robot" (set from the variant)
+var variant := ""     # an id from enemy_types_3d.gd, e.g. "riot", "bomb"
+var depth := 1        # floor number: deeper = tougher
+var _ability_t := 0.0     # cooldown / timer for the variant's trick
+var _ability_phase := 0   # 0 idle, 1 winding up, 2 doing it
+var _dash_dir := Vector3.ZERO
+var _fx: Node3D           # shield, warning ring, etc.
+var _fx_mat: StandardMaterial3D
+var _met := false
+var _laser: MeshInstance3D   # gunner / turret aiming line
+var _aim := Vector3.ZERO
 var target: Node3D
 var hp := 3.0
 var active := false
@@ -64,6 +75,10 @@ var _mrig: RefCounted              # MeshyRig when a Meshy model is loaded
 
 func _ready() -> void:
 	add_to_group("enemies")
+	if variant == "":
+		variant = kind
+	var info: Dictionary = Types.TYPES[variant]
+	kind = info["base"]
 	var shape := CollisionShape3D.new()
 	var cap := CapsuleShape3D.new()
 	cap.radius = 0.35
@@ -84,14 +99,35 @@ func _ready() -> void:
 		else:
 			_build_robot()
 		_build_baton()
+		if variant == "bomb":
+			_baton.visible = false
+	elif kind == "turret":
+		hp = Tune.TURRET_HP
+		speed = 0.0
+		cap.radius = 0.5
+		_build_turret()
 	elif MeshyRig.find("guard.glb") != "":
 		_mrig = MeshyRig.load_into(_body, MeshyRig.find("guard.glb"), GUARD_HEIGHT)
 	else:
 		_build_guard()
+	# the variant: tougher, faster or slower, recoloured, plus its gear
+	var floor_boost := 1.0 + Tune.ENEMY_HP_PER_FLOOR * (depth - 1)
+	hp *= info["hp"] * floor_boost
+	speed *= info["speed"] * minf(1.35, 1.0 + Tune.ENEMY_SPEED_PER_FLOOR * (depth - 1))
+	if _mrig:
+		_mrig.tint(info["tint"])
+	else:
+		for m in _mats:
+			m.albedo_color = m.albedo_color * info["tint"]
+	if variant == "enforcer":
+		_body.scale = Vector3.ONE * 1.25
+	_build_variant_gear(info["tint"])
 	if _mrig:
 		# Meshy textures are dark: a faint light up front keeps the shape readable
 		var rim := OmniLight3D.new()
 		rim.light_color = Color(1.0, 0.35, 0.3) if kind == "robot" else Color(0.75, 0.85, 1.0)
+		if info["tint"] != Color(1, 1, 1):
+			rim.light_color = info["tint"]
 		rim.light_energy = 1.4
 		rim.omni_range = 3.0
 		rim.position = Vector3(0, (ROBOT_HEIGHT if kind == "robot" else GUARD_HEIGHT) * 0.8, 0.9)
@@ -321,15 +357,338 @@ func _place_baton() -> void:
 	_baton_light.light_energy = 0.6 + 3.0 * charge
 
 
+# --- variant tricks -------------------------------------------------------------
+
+func _build_variant_gear(c: Color) -> void:
+	match variant:
+		"riot":
+			# a tall steel shield with yellow hazard stripes, held out front
+			_fx = Node3D.new()
+			_body.add_child(_fx)
+			var shield := Look.box(_fx, Vector3(0.9, 1.4, 0.08), Vector3(0.1, 1.0, 0.55), Look.steel(Color("3a3d42")))
+			shield.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+			Look.box(_fx, Vector3(0.92, 0.12, 0.09), Vector3(0.1, 1.45, 0.56), Look.hazard())
+			Look.box(_fx, Vector3(0.6, 0.12, 0.02), Vector3(0.1, 1.15, 0.6), Look.glow(c, 1.5))
+		"shock", "enforcer", "bomb":
+			# a warning ring on the floor that lights up while it charges
+			_fx = MeshInstance3D.new()
+			var torus := TorusMesh.new()
+			var r := 3.2 if variant != "bomb" else Tune.BOMB_RADIUS
+			torus.inner_radius = r - 0.12
+			torus.outer_radius = r
+			torus.rings = 48
+			(_fx as MeshInstance3D).mesh = torus
+			_fx_mat = Look.glow(c, 4.0).duplicate() as StandardMaterial3D
+			_fx_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			_fx_mat.albedo_color.a = 0.0
+			(_fx as MeshInstance3D).material_override = _fx_mat
+			_fx.position.y = 0.06
+			_fx.visible = variant != "enforcer"
+			add_child(_fx)
+			_ability_t = randf_range(1.0, 2.5)
+
+
+## Runs the variant's special move. Returns how it wants to move this frame,
+## or Vector3.INF to fall back to the normal chase.
+func _ability(delta: float, to: Vector3, level: Node) -> Vector3:
+	var dist := to.length()
+	var dir := to.normalized() if dist > 0.01 else Vector3.FORWARD
+	_ability_t -= delta
+	match variant:
+		"taser":
+			# hang back at dart range, fire, sidestep
+			if _ability_t <= 0.0 and dist < 9.0 and dist > 2.0:
+				_ability_t = Tune.TASER_RELOAD
+				_shoot(_muzzle(), (target.global_position + Vector3(0, 1.2, 0) - _muzzle()).normalized(), 15.0, 1, Color(0.4, 1.0, 0.9), Tune.TASER_SLOW, level)
+			if dist < 4.5:
+				return -dir * speed * 0.7 + dir.cross(Vector3.UP) * speed * 0.4 * sin(_t)
+			if dist < 7.0:
+				return dir.cross(Vector3.UP) * speed * 0.5 * signf(sin(_t * 0.7))
+		"enforcer":
+			if _ability_phase == 0 and _ability_t <= 0.0 and dist > 3.0 and dist < 10.0:
+				_ability_phase = 1
+				_ability_t = 0.6                  # wind-up: glows, stands still
+				_dash_dir = dir
+			if _ability_phase == 1:
+				_flash = 0.05 + 0.05 * sin(_t * 40.0)
+				_dash_dir = _dash_dir.lerp(dir, delta * 2.0).normalized()
+				if _ability_t <= 0.0:
+					_ability_phase = 2
+					_ability_t = 0.5
+				return Vector3.ZERO
+			if _ability_phase == 2:
+				if dist < 1.3 and _touch_cooldown <= 0.0:
+					target.hit(global_position, 2, 14.0)
+					_touch_cooldown = 1.0
+				if _ability_t <= 0.0:
+					_ability_phase = 0
+					_ability_t = Tune.ENFORCER_COOLDOWN
+				return _dash_dir * speed * 3.0
+		"gunner", "turret":
+			var turret := variant == "turret"
+			if _ability_phase == 0 and _ability_t <= 0.0 and dist > 1.5 and dist < (14.0 if turret else 11.0):
+				_ability_phase = 1
+				_ability_t = Tune.GUNNER_AIM
+				_aim = to
+			if _ability_phase == 1:
+				# the laser sight drifts onto Victor, then locks and fires
+				_aim = _aim.lerp(to, minf(1.0, delta * 3.0))
+				_show_laser(_aim)
+				if _ability_t <= 0.0:
+					_ability_phase = 0
+					_ability_t = Tune.GUNNER_RELOAD * (0.8 if turret else 1.0)
+					_laser.visible = false
+					_shoot(_muzzle(), _aim.normalized(), 26.0, 1, Color(1.0, 0.3, 0.25), 0.0, level)
+				return Vector3.ZERO
+			if turret:
+				return Vector3.ZERO
+			if dist < 5.0:
+				return -dir * speed * 0.7
+			if dist < 9.0:
+				return dir.cross(Vector3.UP) * speed * 0.5 * signf(sin(_t * 0.6))
+		"grenadier":
+			if _ability_t <= 0.0 and dist < 9.0 and dist > 2.0:
+				_ability_t = Tune.GRENADE_RELOAD
+				_throw_grenade(target.global_position + Vector3(target.velocity.x, 0, target.velocity.z) * 0.4, level)
+			if dist < 5.0:
+				return -dir * speed * 0.6 + dir.cross(Vector3.UP) * speed * 0.4
+		"shock":
+			if _ability_phase == 0 and _ability_t <= 0.0 and dist < 4.0:
+				_ability_phase = 1
+				_ability_t = 0.9
+			if _ability_phase == 1:
+				var k := 1.0 - _ability_t / 0.9
+				_fx_mat.albedo_color.a = 0.2 + 0.8 * k
+				_fx_mat.emission_energy_multiplier = 2.0 + 10.0 * k
+				if _ability_t <= 0.0:
+					_ability_phase = 0
+					_ability_t = Tune.SHOCK_COOLDOWN
+					_fx_mat.albedo_color.a = 0.0
+					_burst(Color(0.5, 0.75, 1.0), 3.2)
+					if dist < 3.2:
+						target.hit(global_position, 1, 9.0)
+						target.slow(1.0)
+				return Vector3.ZERO
+		"bomb":
+			if _ability_phase == 0 and dist < 1.8:
+				_ability_phase = 1
+				_ability_t = 0.9
+			if _ability_phase == 1:
+				var k := 1.0 - _ability_t / 0.9
+				_flash = 0.12 if fmod(_t, 0.18 - 0.12 * k) < 0.06 else 0.0
+				_fx_mat.albedo_color.a = 0.3 + 0.7 * k
+				if _ability_t <= 0.0:
+					_explode()
+				return Vector3.ZERO
+	return Vector3.INF
+
+
+func _muzzle() -> Vector3:
+	return global_position + Vector3(0, 1.55 if kind == "turret" else 1.3, 0)
+
+
+func _show_laser(aim: Vector3) -> void:
+	if not _laser:
+		_laser = MeshInstance3D.new()
+		var bm := BoxMesh.new()
+		bm.size = Vector3(0.03, 0.03, 1.0)
+		_laser.mesh = bm
+		var m := Look.glow(Color(1.0, 0.1, 0.1), 6.0).duplicate() as StandardMaterial3D
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		m.albedo_color.a = 0.8
+		_laser.material_override = m
+		_laser.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		_laser.top_level = true
+		add_child(_laser)
+	var from := _muzzle()
+	var length := 16.0
+	# stop the beam at the first wall
+	var level := get_tree().current_scene
+	if level.has_method("is_wall"):
+		for i in 32:
+			var p := from + aim.normalized() * (i * 0.5)
+			if level.is_wall(p):
+				length = i * 0.5
+				break
+	_laser.visible = true
+	_laser.global_transform = Transform3D(Basis.looking_at(aim.normalized(), Vector3.UP), from + aim.normalized() * length * 0.5)
+	_laser.scale = Vector3(1, 1, length)
+
+
+func _shoot(from: Vector3, dir: Vector3, spd: float, dmg: int, c: Color, slow_s: float, level: Node) -> void:
+	var shot := Node3D.new()
+	var bolt := Look.cylinder(shot, 0.05, 0.6, Vector3.ZERO, Look.glow(c, 9.0), 6)
+	bolt.rotation.x = PI / 2
+	var light := OmniLight3D.new()
+	light.light_color = c
+	light.light_energy = 1.5
+	light.omni_range = 2.5
+	shot.add_child(light)
+	level.add_child(shot)
+	shot.global_position = from
+	shot.look_at(from + dir, Vector3.UP)
+	_fly(shot, dir * spd, dmg, slow_s, level)
+
+
+func _fly(shot: Node3D, vel: Vector3, dmg: int, slow_s: float, level: Node) -> void:
+	var life := [1.2]
+	var victim := target
+	var t := Timer.new()
+	t.wait_time = 1.0 / 60.0
+	t.autostart = true
+	shot.add_child(t)
+	t.timeout.connect(func() -> void:
+		life[0] -= t.wait_time
+		shot.global_position += vel * t.wait_time
+		var done: bool = life[0] <= 0.0
+		if is_instance_valid(victim) and shot.global_position.distance_to(victim.global_position + Vector3(0, 1.2, 0)) < 0.75:
+			victim.hit(shot.global_position, dmg, 4.0)
+			if slow_s > 0.0:
+				victim.slow(slow_s)
+			done = true
+		if level.has_method("is_wall") and level.is_wall(shot.global_position):
+			done = true
+		if done:
+			shot.queue_free())
+
+
+func _throw_grenade(at: Vector3, level: Node) -> void:
+	# lobbed in an arc; lands, blinks inside a warning ring, then goes off
+	var g := Node3D.new()
+	Look.sphere(g, 0.14, Vector3.ZERO, Look.steel(Color("3b4a2a")))
+	var blink := Look.sphere(g, 0.06, Vector3(0, 0.14, 0), Look.glow(Color(1, 0.2, 0.1), 8.0))
+	level.add_child(g)
+	var start := global_position + Vector3(0, 1.6, 0)
+	g.global_position = start
+	at.y = 0.15
+	var ring := MeshInstance3D.new()
+	var torus := TorusMesh.new()
+	torus.inner_radius = Tune.GRENADE_RADIUS - 0.1
+	torus.outer_radius = Tune.GRENADE_RADIUS
+	torus.rings = 48
+	ring.mesh = torus
+	var rm := Look.glow(Color(1, 0.25, 0.1), 5.0).duplicate() as StandardMaterial3D
+	rm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	rm.albedo_color.a = 0.0
+	ring.material_override = rm
+	level.add_child(ring)
+	ring.global_position = Vector3(at.x, 0.06, at.z)
+	var tw := g.create_tween()
+	tw.tween_method(func(k: float) -> void:
+		g.global_position = start.lerp(at, k) + Vector3(0, sin(k * PI) * 2.0, 0), 0.0, 1.0, 0.6)
+	tw.parallel().tween_property(rm, "albedo_color:a", 0.7, 0.6)
+	# blink faster and faster through the fuse
+	var steps := 8
+	for i in steps:
+		var gap := Tune.GRENADE_FUSE / steps
+		tw.tween_callback(func() -> void: blink.visible = not blink.visible)
+		tw.tween_interval(gap)
+	tw.tween_callback(func() -> void:
+		var victim := target
+		if is_instance_valid(victim) and Vector2(victim.global_position.x - at.x, victim.global_position.z - at.z).length() < Tune.GRENADE_RADIUS:
+			victim.hit(at, 2, 12.0)
+		for e in get_tree().get_nodes_in_group("enemies"):
+			if Vector2(e.global_position.x - at.x, e.global_position.z - at.z).length() < Tune.GRENADE_RADIUS:
+				e.take_hit(at, 2.0, 10.0)
+		_burst_at(at, Color(1.0, 0.5, 0.15), Tune.GRENADE_RADIUS, level)
+		if level.has_method("shake"):
+			level.shake(0.35)
+		ring.queue_free()
+		g.queue_free())
+
+
+func _build_turret() -> void:
+	# stand-in until Jon saves models/turret.glb: a squat armoured base with
+	# a turning head, a barrel and a red eye
+	if MeshyRig.find("turret.glb") != "":
+		var mrig = MeshyRig.load_into(_body, MeshyRig.find("turret.glb"), 2.0)
+		_mrig = null
+		mrig.model.set_meta("rig", mrig)
+		return
+	var dark := Look.steel(Color("2a2c31")).duplicate() as StandardMaterial3D
+	_mats.append(dark)
+	var plate := Look.steel(Color("4a4d52")).duplicate() as StandardMaterial3D
+	_mats.append(plate)
+	Look.cylinder(_body, 0.55, 0.3, Vector3(0, 0.15, 0), dark, 8)
+	Look.box(_body, Vector3(0.6, 0.15, 0.6), Vector3(0, 0.33, 0), Look.hazard())
+	Look.cylinder(_body, 0.18, 0.9, Vector3(0, 0.85, 0), dark, 8)
+	Look.box(_body, Vector3(0.75, 0.45, 0.7), Vector3(0, 1.5, 0), plate)
+	var barrel := Look.cylinder(_body, 0.07, 0.8, Vector3(0, 1.5, 0.65), dark, 8)
+	barrel.rotation.x = PI / 2
+	Look.sphere(_body, 0.08, Vector3(0.22, 1.6, 0.36), Look.glow(Color(1, 0.1, 0.1), 6.0))
+
+
+func _explode() -> void:
+	_ability_phase = 2
+	var at := global_position
+	_burst(Color(1.0, 0.55, 0.15), Tune.BOMB_RADIUS)
+	var level := get_tree().current_scene
+	if level and level.has_method("shake"):
+		level.shake(0.5)
+	if is_instance_valid(target) and target.global_position.distance_to(at) < Tune.BOMB_RADIUS:
+		target.hit(at, Tune.BOMB_DAMAGE, 14.0)
+	for e in get_tree().get_nodes_in_group("enemies"):
+		if e != self and e.global_position.distance_to(at) < Tune.BOMB_RADIUS:
+			e.take_hit(at, 4.0, 12.0)
+	if not _dead:
+		hp = 0.0
+		_die()
+
+
+func _burst(c: Color, radius: float) -> void:
+	_burst_at(global_position, c, radius, get_tree().current_scene)
+
+
+func _burst_at(at: Vector3, c: Color, radius: float, level: Node) -> void:
+	# a flash of light and an expanding ring on the floor
+	var ring := MeshInstance3D.new()
+	var torus := TorusMesh.new()
+	torus.inner_radius = 0.85
+	torus.outer_radius = 1.0
+	ring.mesh = torus
+	var m := Look.glow(c, 8.0).duplicate() as StandardMaterial3D
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	ring.material_override = m
+	level.add_child(ring)
+	ring.global_position = Vector3(at.x, 0.1, at.z)
+	ring.scale = Vector3.ONE * 0.3
+	var flash := OmniLight3D.new()
+	flash.light_color = c
+	flash.light_energy = 6.0
+	flash.omni_range = radius * 2.0
+	ring.add_child(flash)
+	var tw := ring.create_tween().set_parallel(true)
+	tw.tween_property(ring, "scale", Vector3.ONE * radius, 0.25)
+	tw.tween_property(m, "albedo_color:a", 0.0, 0.4)
+	tw.tween_property(flash, "light_energy", 0.0, 0.4)
+	tw.chain().tween_callback(ring.queue_free)
+
+
+func _shield_spark() -> void:
+	if _fx:
+		var tw := create_tween()
+		_fx.scale = Vector3(1.08, 1.08, 1.08)
+		tw.tween_property(_fx, "scale", Vector3.ONE, 0.12)
+
+
 func take_hit(from: Vector3, damage := 1.0, force := 6.0) -> void:
 	if _dead:
 		return
 	active = true
+	if variant == "riot":
+		# the shield soaks most of a punch from the front
+		var facing := Vector3(sin(_body.rotation.y), 0, cos(_body.rotation.y))
+		var toward := from - global_position
+		toward.y = 0
+		if toward.length() > 0.01 and facing.dot(toward.normalized()) > 0.35:
+			damage *= 0.25
+			force *= 0.4
+			_shield_spark()
 	hp -= damage
 	_flash = 0.15
 	var away := global_position - from
 	away.y = 0
-	_knock = away.normalized() * force
+	_knock = away.normalized() * force if kind != "turret" else Vector3.ZERO
 	if hp <= 0.0:
 		_die()
 
@@ -340,6 +699,14 @@ func _die() -> void:
 	collision_layer = 0
 	collision_mask = 1
 	defeated.emit(global_position)
+	if _fx:
+		_fx.queue_free()
+		_fx = null
+	if _laser:
+		_laser.queue_free()
+		_laser = null
+	if variant == "bomb" and _ability_phase != 2:
+		_explode()
 	if _baton:
 		_baton.queue_free()
 		_baton = null
@@ -376,12 +743,19 @@ func _physics_process(delta: float) -> void:
 				_repath = 0.3
 				_waypoint = level.path_next(global_position, target.global_position)
 			var reach := 0.95
-			if kind == "robot":
+			if kind == "robot" and variant != "bomb":
 				reach = SWING_RANGE * 0.8
 				if _swing < 0.0 and to.length() < SWING_RANGE and _touch_cooldown <= 0.0:
 					_start_swing()
 					_touch_cooldown = SWING_WINDUP + SWING_STRIKE + SWING_RECOVER + 0.4
-			if _swing >= 0.0 and _swing < SWING_WINDUP + SWING_STRIKE:
+			if not _met:
+				_met = true
+				if level.has_method("meet"):
+					level.meet(variant)
+			var special := _ability(delta, to, level)
+			if special != Vector3.INF:
+				move = special      # the variant's trick decides how it moves
+			elif _swing >= 0.0 and _swing < SWING_WINDUP + SWING_STRIKE:
 				pass   # planted while swinging
 			elif to.length() > reach:
 				var goal := to
@@ -389,7 +763,7 @@ func _physics_process(delta: float) -> void:
 					goal = _waypoint - global_position
 					goal.y = 0
 				move = goal.normalized() * speed
-			elif kind != "robot" and _touch_cooldown <= 0.0:
+			elif kind != "robot" and variant != "taser" and _touch_cooldown <= 0.0:
 				target.hit(global_position, 1)
 				_touch_cooldown = 1.0
 			_body.rotation.y = lerp_angle(_body.rotation.y, atan2(to.x, to.z), minf(1.0, delta * 10.0))

@@ -35,3 +35,20 @@ const ENEMY_DENSITY := 2.8         # guards/robots per room, on average
 const ROBOT_SHARE := 0.25          # fraction of enemies that are robots
 const CALM_RADIUS := 4.0           # metres Victor can move from the start before the alarm goes off
 const ALARM_RADIUS := 60.0         # the alarm sends every enemy within this many metres after him
+
+# --- Enemy variety (types and colours are in scripts/3d/enemy_types_3d.gd) ---------
+const ENEMY_HP_PER_FLOOR := 0.15   # +15% health for every floor down
+const ENEMY_SPEED_PER_FLOOR := 0.03 # +3% speed per floor (capped at +35%)
+const TASER_RELOAD := 2.4          # seconds between taser darts
+const TASER_SLOW := 1.4            # seconds a dart slows Victor
+const ENFORCER_COOLDOWN := 3.5     # seconds between Enforcer charges
+const SHOCK_COOLDOWN := 3.0        # seconds between Shock Unit blasts
+const BOMB_RADIUS := 3.5           # Scrap Bomber blast size (metres)
+const BOMB_DAMAGE := 3
+const GUNNER_RELOAD := 2.2         # seconds between Gunner shots
+const GUNNER_AIM := 0.7            # seconds the red laser shows before a shot
+const GRENADE_RELOAD := 4.0        # seconds between grenades
+const GRENADE_FUSE := 1.3          # seconds a grenade blinks before it goes off
+const GRENADE_RADIUS := 2.8
+const TURRET_CHANCE := 0.3         # chance a hall gets a wall turret (guard posts: double)
+const TURRET_HP := 7.0

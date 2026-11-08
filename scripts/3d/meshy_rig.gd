@@ -164,6 +164,24 @@ func update(delta: float, moving: bool, ground_speed := 0.0) -> void:
 		skel.set_bone_pose_position(bones["hips"], Vector3(_hips_rest.x, p.y, _hips_rest.z))
 
 
+## Recolours the model: multiplies its textures by `c` and adds a faint glow
+## of the same colour so variants read clearly in the dark.
+func tint(c: Color) -> void:
+	if c == Color(1, 1, 1):
+		return
+	for mi in model.find_children("*", "MeshInstance3D", true, false):
+		var m := mi as MeshInstance3D
+		for i in m.mesh.get_surface_count():
+			var src := m.get_active_material(i)
+			if src is StandardMaterial3D:
+				var mat := (src as StandardMaterial3D).duplicate() as StandardMaterial3D
+				mat.albedo_color = c
+				mat.emission_enabled = true
+				mat.emission = c
+				mat.emission_energy_multiplier = 0.15
+				m.set_surface_override_material(i, mat)
+
+
 func flash(amount: float, tint := Color(1, 0.95, 0.9)) -> void:
 	overlay.albedo_color = Color(tint, clampf(amount, 0.0, 0.85))
 
