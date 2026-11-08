@@ -22,6 +22,7 @@ const LevelUpScript := preload("res://scripts/level_up.gd")
 const LIGHT_RANGE := 30.0   # metres around Victor where lamps are switched on
 const Look := preload("res://scripts/3d/look_3d.gd")
 const VictorScript := preload("res://scripts/3d/victor_3d.gd")
+const Minimap := preload("res://scripts/3d/minimap_3d.gd")
 const GuardScript := preload("res://scripts/3d/guard_3d.gd")
 ## The 3D Cell Block C: about twice the size of the 2D one, built for running.
 ## # wall  . floor  b bunk  t toilet  B electrified glass cell front
@@ -141,7 +142,8 @@ func _ready() -> void:
 	_build_paths()
 	Powerup.scatter(self, map, _rng, Tune.POWERUPS_PER_FLOOR, CELL, _start_at)
 	_build_hud()
-	_say("%s\nWASD to move.  Click, Space or J to punch.  Find the lift." % _title(), Color("ffd23f"), 4.0)
+	Minimap.make(self)     # the fog-of-war map (minimap_3d.gd)
+	_say("%s\nWASD to move.  Click or J to punch.  Space to dash.  M for the map.  Find the lift." % _title(), Color("ffd23f"), 4.0)
 
 
 func cell_pos(x: float, y: float) -> Vector3:
@@ -844,7 +846,7 @@ func _build_hud() -> void:
 	_hud = CanvasLayer.new()
 	add_child(_hud)
 	_chroma(_title(), Vector2(28, 20), Vector2(600, 30), 20, Color("ffd23f"))
-	_chroma("MOVE [WASD]   PUNCH [CLICK/SPACE]", Vector2(28, 48), Vector2(600, 20), 12, Color(0.62, 0.7, 0.82, 0.75))
+	_chroma("MOVE [WASD]   PUNCH [CLICK/J]   DASH [SPACE]   MAP [M]", Vector2(28, 48), Vector2(600, 20), 12, Color(0.62, 0.7, 0.82, 0.75))
 	_chroma("VITALS", Vector2(28, 76), Vector2(200, 16), 11, Color(0.62, 0.7, 0.82, 0.75))
 	_health_bar = Control.new()
 	_health_bar.set_script(NeonBarScript)

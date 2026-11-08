@@ -69,3 +69,14 @@ const FLOOR_THEME := ""            # "" = floor 1 is Victor's Cell Block, then y
 const PRISONER_AMOUNT := 1.0       # 1 = normal crowd of panicking prisoners, 0 = none, 2 = twice as many
 const PRISONER_SPEED := 4.6        # they run too: it's an earthquake
 const VAULT_DOOR_HITS := 8         # punches to smash an armory vault door open
+
+# --- Dash (Space) -------------------------------------------------------------------
+const DASH_SPEED := 24.0           # metres per second during the burst
+const DASH_TIME := 0.16            # seconds it lasts (24 x 0.16 = about 4 m)
+const DASH_COOLDOWN := 0.9         # seconds before he can dash again
+const DASH_INVULNERABLE := true    # true = nothing can hurt him mid-dash
+
+# --- Map (M or Tab for the big one) ----------------------------------------------------
+const MAP_SIGHT := 9               # squares (2 m each) Victor can see, for uncovering the map
+const MAP_ZOOM := 4.0              # pixels per square on the small corner map
+const MAP_PAUSES := true           # true = the game stops while the big map is open
