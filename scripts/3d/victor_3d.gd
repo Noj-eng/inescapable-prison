@@ -181,7 +181,8 @@ func _punch() -> void:
 	var reach := PUNCH_REACH * (1.25 if heavy else 1.0)
 	_start_swipe(reach, heavy)
 	var landed := false
-	for enemy in get_tree().get_nodes_in_group("enemies"):
+	# "breakables": things he can smash, like the armory vault doors
+	for enemy in get_tree().get_nodes_in_group("enemies") + get_tree().get_nodes_in_group("breakables"):
 		var d: Vector3 = enemy.global_position - global_position
 		d.y = 0
 		var dist := d.length()

@@ -11,6 +11,7 @@ extends Node3D
 
 const Tune := preload("res://scripts/3d/tuning_3d.gd")
 const PrisonGen := preload("res://scripts/3d/prison_gen.gd")
+const Themes := preload("res://scripts/3d/themes_3d.gd")
 const Types := preload("res://scripts/3d/enemy_types_3d.gd")
 const LIGHT_RANGE := 30.0   # metres around Victor where lamps are switched on
 const Look := preload("res://scripts/3d/look_3d.gd")
@@ -68,6 +69,8 @@ const BACK_WALL_H := 5.0    # walls along the back edges
 const SOLID := "#BbtdxocT"
 
 var map: Array = []
+var theme := ""             # this floor's theme (themes_3d.gd): cell block, armory, ...
+static var _last_theme := ""
 var rows := 0
 var cols := 0
 var player: CharacterBody3D
@@ -108,6 +111,9 @@ func _ready() -> void:
 		var seed_value := Tune.LEVEL_SEED + depth if Tune.LEVEL_SEED != 0 else randi()
 		var gen := PrisonGen.new()
 		gen.turret_chance = Tune.TURRET_CHANCE
+		theme = Themes.pick(depth, _last_theme)
+		_last_theme = theme
+		gen.theme = theme
 		map = gen.generate(seed_value, Tune.LEVEL_BLOCKS_X, Tune.LEVEL_BLOCKS_Y,
 				Tune.LEVEL_WINDING, Tune.ENEMY_DENSITY, Tune.ROBOT_SHARE)
 		print("Prison floor %d, seed %d" % [depth, seed_value])
@@ -190,6 +196,8 @@ func _build_level() -> void:
 	var wall_mat := Look.concrete(Color("5d5f63"), 0.25)
 	var back_mat := Look.concrete(Color("4d4f54"), 0.2)
 	var dark_steel := Look.steel(Color("2d3036"))
+	floor_mat = Themes.floor_mat(self, floor_mat)
+	wall_mat = Themes.wall_mat(self, wall_mat)
 	var start := Vector3.ZERO
 	var cell_number := 4
 
@@ -245,6 +253,8 @@ func _build_level() -> void:
 					_spawn_enemy("turret", at)
 				"G", "M":
 					_spawn_enemy("robot" if ch == "M" else "guard", at)
+				_:
+					Themes.build(self, ch, x, y, at)   # theme props (themes_3d.gd)
 			if ch == "." and _ch(x - 1, y) == "B" and _ch(x + 1, y) == "B":
 				_smashed_glass(at)   # cell 7: the quake already blew this one out
 	# lintels and cell numbers above every row of glass fronts
@@ -277,6 +287,7 @@ func _build_level() -> void:
 	_overhead_lamps()
 	_scatter_cracks_rubble_cables()
 	_the_drop()
+	Themes.finish(self)
 
 	player = CharacterBody3D.new()
 	player.set_script(VictorScript)
@@ -617,7 +628,7 @@ func _build_paths() -> void:
 	_astar.update()
 	for y in rows:
 		for x in cols:
-			if SOLID.contains(map[y][x]):
+			if (SOLID + Themes.SOLID).contains(map[y][x]):
 				_astar.set_point_solid(Vector2i(x, y))
 
 
@@ -664,7 +675,7 @@ func path_length(from: Vector3, to: Vector3) -> int:
 
 func _title() -> String:
 	if Tune.LEVEL_PROCEDURAL:
-		return "THE PRISON  //  FLOOR -%d" % depth
+		return "%s  //  FLOOR -%d" % [Themes.title(theme), depth]
 	return "CELL BLOCK C  //  3D TEST"
 
 

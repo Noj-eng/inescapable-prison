@@ -25,6 +25,8 @@ var _corr := {}          # every tile a corridor runs through: kept clear
 ## 1 = a pure maze with one route. density: enemies per room, on average.
 ## robot_share: 0..1 of enemies that are robots.
 var turret_chance := 0.3   # chance a guard post or hall gets a turret
+var theme := ""            # "cellblock", "armory", ...: see theme_gen.gd ("" = old mixed rooms)
+const ThemeGen := preload("res://scripts/3d/theme_gen.gd")
 
 
 func generate(seed_value: int, blocks_x: int, blocks_y: int, winding: float, density: float, robot_share: float) -> Array:
@@ -131,6 +133,8 @@ func _generate(seed_value: int, blocks_x: int, blocks_y: int, winding: float, de
 			_clear_around(_centre(r))
 			_put(_centre(r), "E")
 			continue
+		if theme != "" and ThemeGen.dress_room(self, theme, b, r, north_free):
+			continue
 		var roll := _rng.randf()
 		if roll < 0.35 and north_free and r.size.x >= 9 and r.size.y >= 8 and not _corridor_in(Rect2i(r.position.x - 1, r.position.y - 1, r.size.x + 2, 6)):
 			_dress_cells(r)
@@ -149,6 +153,9 @@ func _generate(seed_value: int, blocks_x: int, blocks_y: int, winding: float, de
 			var spot := _free_spot(r)
 			if spot.x >= 0:
 				_put(spot, "M" if _rng.randf() < robot_share else "G")
+
+	if theme != "":
+		ThemeGen.finish(self, theme, rooms, far)
 
 	var out := []
 	for row in _g:
@@ -295,7 +302,7 @@ func reachable(map: Array) -> bool:
 			var n: Vector2i = c + d
 			if seen.has(n) or n.y < 0 or n.y >= map.size() or n.x < 0 or n.x >= (map[n.y] as String).length():
 				continue
-			if "#BbtdxocT".contains((map[n.y] as String)[n.x]):
+			if ("#BbtdxocT" + ThemeGen.SOLID).contains((map[n.y] as String)[n.x]):
 				continue
 			seen[n] = true
 			queue.append(n)
