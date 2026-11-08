@@ -7,6 +7,8 @@ extends CharacterBody3D
 
 signal health_changed(hp: int, max_hp: int)
 signal died
+signal xp_changed(xp: int, needed: int, level: int)
+signal leveled_up
 
 const Look := preload("res://scripts/3d/look_3d.gd")
 const ARC_SHADER := preload("res://shaders/punch_arc_3d.gdshader")
@@ -16,6 +18,7 @@ const Tune := preload("res://scripts/3d/tuning_3d.gd")
 const SPEED := Tune.VICTOR_SPEED
 const Skills := preload("res://scripts/3d/skills_3d.gd")
 const Equipment := preload("res://scripts/3d/equipment_3d.gd")
+const RunXP := preload("res://scripts/3d/run_xp_3d.gd")
 const RALLY_RADIUS := 10.0      # metres: prisoners this close hear the shout
 const PUNCH_REACH := 1.9
 const PUNCH_ARC := 0.5            # cos(60 degrees) -> 120-degree arc
@@ -45,6 +48,11 @@ var armour := 0
 var _armour_shell: MeshInstance3D
 var _rally_cooldown := 0.0
 var _gear_nodes := []       # armour/weapon pieces riding his bones
+# level-up abilities (run_xp_3d.gd)
+var _storm_t := 2.0
+var _shards: Array[MeshInstance3D] = []
+var _shard_hit := {}        # enemy -> seconds until a shard can cut it again
+var _shard_angle := 0.0
 var _armour_mat: StandardMaterial3D
 var _walk := 0.0
 var _t := 0.0
@@ -94,6 +102,7 @@ func _ready() -> void:
 		_load_model()
 	else:
 		_build_stand_in()
+	_build_shards()        # Telekinetic Storm carries over between floors
 
 	# a see-through blue shell while Mattress Armour is soaking hits
 	_armour_shell = MeshInstance3D.new()
@@ -139,10 +148,173 @@ func wear(id: String) -> void:
 		if is_instance_valid(n):
 			n.queue_free()
 	_gear_nodes = Equipment.dress(_mrig, Skills.gear) if _mrig else []
+	_refresh_max_hp()
+
+
+func _refresh_max_hp() -> void:
 	var new_max := 10 + int(Skills.value("max_hp"))
 	hp += maxi(0, new_max - max_hp)
 	max_hp = new_max
 	health_changed.emit(hp, max_hp)
+
+
+# --- experience and level-up abilities -------------------------------------------
+
+func pickup_radius() -> float:
+	return 2.5 + 2.0 * Skills.value("magnet")
+
+
+func add_xp(amount: int) -> void:
+	var gained := RunXP.add(amount)
+	xp_changed.emit(RunXP.xp, RunXP.needed(), RunXP.level)
+	if gained > 0:
+		leveled_up.emit()
+
+
+## Picked on the level-up screen.
+func learn(id: String) -> void:
+	RunXP.take(id)
+	_refresh_max_hp()     # Iron Hide raises max health and heals the difference
+	_build_shards()
+
+
+## Every beaten enemy: Dark Vitality heals now and then.
+func on_knockout() -> void:
+	RunXP.knockouts += 1
+	var v := int(Skills.value("vitality"))
+	if v > 0 and RunXP.knockouts % maxi(2, 7 - v) == 0 and hp < max_hp:
+		hp += 1
+		health_changed.emit(hp, max_hp)
+
+
+func _enemies_near(radius: float) -> Array:
+	var out := []
+	for e in get_tree().get_nodes_in_group("enemies"):
+		if e.global_position.distance_to(global_position) < radius:
+			out.append(e)
+	return out
+
+
+## Seismic Slam: the heavy hook cracks the floor all around him.
+func _seismic() -> void:
+	var r := 2.6 + 0.5 * Skills.value("seismic")
+	for e in _enemies_near(r):
+		e.take_hit(global_position, 1.0 + 0.3 * Skills.value("seismic"), 7.0)
+	var ring := MeshInstance3D.new()
+	var torus := TorusMesh.new()
+	torus.inner_radius = 0.8
+	torus.outer_radius = 1.0
+	ring.mesh = torus
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.albedo_color = Color(1.0, 0.6, 0.25, 0.9)
+	ring.material_override = m
+	ring.position = global_position + Vector3(0, 0.08, 0)
+	ring.scale = Vector3(0.5, 0.15, 0.5)
+	get_tree().current_scene.add_child(ring)
+	var tw := ring.create_tween().set_parallel()
+	tw.tween_property(ring, "scale", Vector3(r, 0.15, r), 0.3).set_ease(Tween.EASE_OUT)
+	tw.tween_property(m, "albedo_color:a", 0.0, 0.4)
+	tw.chain().tween_callback(ring.queue_free)
+	_shake(0.25)
+
+
+## Storm Caller: every few seconds a bolt jumps to the nearest enemy.
+func _storm(delta: float) -> void:
+	var rank := Skills.value("storm")
+	if rank <= 0.0:
+		return
+	_storm_t -= delta
+	if _storm_t > 0.0:
+		return
+	_storm_t = maxf(0.8, 3.6 - 0.5 * rank)
+	var best: Node3D = null
+	var best_d := 9.0
+	for e in _enemies_near(9.0):
+		var d: float = e.global_position.distance_to(global_position)
+		if d < best_d:
+			best = e
+			best_d = d
+	if best == null:
+		_storm_t = 0.3
+		return
+	best.take_hit(global_position, 1.0 + 0.25 * rank, 3.0)
+	_bolt(global_position + Vector3(0, 1.8, 0), best.global_position + Vector3(0, 1.0, 0))
+
+
+func _bolt(a: Vector3, b: Vector3) -> void:
+	var im := ImmediateMesh.new()
+	im.surface_begin(Mesh.PRIMITIVE_LINE_STRIP)
+	var steps := 8
+	for i in steps + 1:
+		var t := float(i) / steps
+		var p := a.lerp(b, t)
+		if i > 0 and i < steps:
+			p += Vector3(randf_range(-0.3, 0.3), randf_range(-0.3, 0.3), randf_range(-0.3, 0.3))
+		im.surface_add_vertex(p)
+	im.surface_end()
+	var mi := MeshInstance3D.new()
+	mi.mesh = im
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.albedo_color = Color(0.6, 0.85, 1.0)
+	mi.material_override = m
+	get_tree().current_scene.add_child(mi)
+	var flash := OmniLight3D.new()
+	flash.light_color = Color(0.5, 0.8, 1.0)
+	flash.light_energy = 4.0
+	flash.omni_range = 4.0
+	flash.position = b
+	get_tree().current_scene.add_child(flash)
+	get_tree().create_timer(0.12).timeout.connect(func():
+		mi.queue_free()
+		flash.queue_free())
+
+
+## Telekinetic Storm: shards of casing orbiting him (one more per rank).
+func _build_shards() -> void:
+	var want := int(Skills.value("shards")) + (1 if Skills.value("shards") > 0.0 else 0)
+	while _shards.size() < want:
+		var s := MeshInstance3D.new()
+		var b := PrismMesh.new()
+		b.size = Vector3(0.22, 0.35, 0.08)
+		s.mesh = b
+		var m := StandardMaterial3D.new()
+		m.albedo_color = Color(0.3, 0.32, 0.36)
+		m.metallic = 0.8
+		m.roughness = 0.35
+		m.emission_enabled = true
+		m.emission = Color(0.55, 0.4, 1.0)
+		m.emission_energy_multiplier = 1.2
+		s.material_override = m
+		s.top_level = true
+		add_child(s)
+		_shards.append(s)
+
+
+func _spin_shards(delta: float) -> void:
+	if _shards.is_empty():
+		return
+	_shard_angle += delta * 3.2
+	for e in _shard_hit.keys():
+		_shard_hit[e] -= delta
+		if _shard_hit[e] <= 0.0:
+			_shard_hit.erase(e)
+	var r := 1.7
+	for i in _shards.size():
+		var a := _shard_angle + TAU * i / _shards.size()
+		var p := global_position + Vector3(cos(a) * r, 1.2 + 0.15 * sin(_t * 4.0 + i), sin(a) * r)
+		_shards[i].global_position = p
+		_shards[i].rotation = Vector3(_t * 5.0 + i, a, 0.4)
+		for e in _enemies_near(r + 1.0):
+			if _shard_hit.has(e):
+				continue
+			var d: Vector3 = e.global_position - p
+			d.y = 0
+			if d.length() < 0.8:
+				e.take_hit(p, 0.5 + 0.15 * Skills.value("shards"), 2.5)
+				_shard_hit[e] = 0.5
 
 
 ## A placeholder Victor: a huge bald brute in a torn orange jumpsuit, arms
@@ -358,6 +530,8 @@ func _punch() -> void:
 	if landed:
 		_shake(0.18 if heavy else 0.08)
 		_hit_stop(0.09 if heavy else 0.05)
+	if heavy and Skills.value("seismic") > 0.0:
+		_seismic()
 	_combo = (_combo + 1) % 3
 
 
@@ -490,6 +664,8 @@ func _physics_process(delta: float) -> void:
 	_animate(move != Vector3.ZERO)
 
 	Equipment.keep_scale(_gear_nodes)
+	_storm(delta)
+	_spin_shards(delta)
 	if _swipe_t < 1.0:
 		_swipe_t = minf(1.0, _swipe_t + delta / _swipe_len)
 		_swipe_mat.set_shader_parameter("progress", _swipe_t)

@@ -16,6 +16,9 @@ const Types := preload("res://scripts/3d/enemy_types_3d.gd")
 const Powerup := preload("res://scripts/3d/powerup_3d.gd")
 const Skills := preload("res://scripts/3d/skills_3d.gd")
 const SkillTree := preload("res://scripts/3d/skill_tree_3d.gd")
+const RunXP := preload("res://scripts/3d/run_xp_3d.gd")
+const XPOrb := preload("res://scripts/3d/xp_orb_3d.gd")
+const LevelUpScript := preload("res://scripts/level_up.gd")
 const LIGHT_RANGE := 30.0   # metres around Victor where lamps are switched on
 const Look := preload("res://scripts/3d/look_3d.gd")
 const VictorScript := preload("res://scripts/3d/victor_3d.gd")
@@ -103,6 +106,9 @@ var _game_over := false
 
 var _hud: CanvasLayer
 var _health_bar: Control
+var _xp_bar: Control
+var _xp_label: Control
+var _level_up: CanvasLayer
 var _hostiles: Control
 var _buffs: Control
 var _buff_text := ""
@@ -307,6 +313,8 @@ func _build_level() -> void:
 	_start_at = start
 	add_child(player)
 	player.health_changed.connect(_on_health_changed)
+	player.xp_changed.connect(_on_xp_changed)
+	player.leveled_up.connect(_on_leveled_up)
 	player.died.connect(_on_player_died)
 	for e in get_tree().get_nodes_in_group("enemies"):
 		e.target = player
@@ -787,12 +795,32 @@ func _new_run() -> void:
 func _on_enemy_defeated(at: Vector3) -> void:
 	enemies_left -= 1
 	Powerup.drop(self, at, _rng)
+	XPOrb.drop(self, at, 1 + (1 if _rng.randf() < 0.15 * depth else 0))
+	if is_instance_valid(player):
+		player.on_knockout()
 	Skills.earn(1 + depth / 3)          # smokes: deeper guards carry more
 	_hostiles.text = "HOSTILES  %02d / %02d" % [enemies_left, total_enemies]
 	if enemies_left == 0:
 		_lift_mat.albedo_color = Color(0.3, 1.0, 0.5)
 		_lift_mat.emission = Color(0.3, 1.0, 0.5)
 		_say("FLOOR CLEAR.\nNot a guard left standing.", Color("4dff88"), 4.0)
+
+
+func _on_xp_changed(xp: int, needed: int, lvl: int) -> void:
+	_xp_bar.value = float(xp) / needed
+	_xp_label.text = "LV %d   XP %d / %d" % [lvl, xp, needed]
+
+
+func _on_leveled_up() -> void:
+	if not _level_up.visible and not _game_over:
+		_level_up.open(RunXP.offer(_rng), RunXP.ABILITIES, RunXP.ranks, RunXP.level)
+
+
+func _on_ability_chosen(id: String) -> void:
+	player.learn(id)
+	# more than one level at once: offer the next pick straight away
+	if RunXP.pending > 0:
+		_level_up.call_deferred("open", RunXP.offer(_rng), RunXP.ABILITIES, RunXP.ranks, RunXP.level)
 
 
 func _on_health_changed(hp: int, max_hp: int) -> void:
@@ -825,7 +853,21 @@ func _build_hud() -> void:
 	_health_bar.color = Color("ff3d6e")
 	_health_bar.segments = 20
 	_hud.add_child(_health_bar)
-	_buffs = _chroma("", Vector2(28, 118), Vector2(600, 18), 12, Color("ffd23f"))
+	_xp_label = _chroma("", Vector2(28, 116), Vector2(220, 16), 11, Color(0.62, 0.7, 0.82, 0.75))
+	_xp_bar = Control.new()
+	_xp_bar.set_script(NeonBarScript)
+	_xp_bar.position = Vector2(28, 134)
+	_xp_bar.size = Vector2(220, 10)
+	_xp_bar.color = Color("4ff0ff")
+	_xp_bar.segments = 20
+	_hud.add_child(_xp_bar)
+	_on_xp_changed(RunXP.xp, RunXP.needed(), RunXP.level)
+	_level_up = LevelUpScript.new()
+	add_child(_level_up)
+	_level_up.chosen.connect(_on_ability_chosen)
+	if RunXP.pending > 0:
+		_on_leveled_up.call_deferred()    # levelled up just as he took the lift
+	_buffs = _chroma("", Vector2(28, 152), Vector2(600, 18), 12, Color("ffd23f"))
 	_smokes = _chroma("", Vector2(1068, 40), Vector2(200, 16), 11, Color("ffd23f"))
 	_hostiles = _chroma("HOSTILES  %02d / %02d" % [enemies_left, total_enemies], Vector2(1068, 20), Vector2(200, 16), 11, Color("ff7a4a"))
 	_message = _chroma("", Vector2(0, 600), Vector2(1280, 90), 20, Color.WHITE)

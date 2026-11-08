@@ -12,6 +12,7 @@ extends RefCounted
 
 const SAVE_PATH := "user://prison_rep.cfg"
 const Equipment := preload("res://scripts/3d/equipment_3d.gd")
+const RunXP := preload("res://scripts/3d/run_xp_3d.gd")
 
 ## The tree. Each skill raises one stat by `per` for every level bought.
 ##   branch: which column it sits in     cost: smokes for level 1 (then x2, x3...)
@@ -130,7 +131,7 @@ static func buy(id: String) -> bool:
 ## Total bonus for a stat: from the saved tree plus this run's perks.
 static func value(stat: String) -> float:
 	load_save()
-	var v: float = run.get(stat, 0.0) + Equipment.stat(gear, stat)
+	var v: float = run.get(stat, 0.0) + Equipment.stat(gear, stat) + RunXP.stat(stat)
 	for s in TREE:
 		if s["stat"] == stat:
 			v += float(s["per"]) * level_of(s["id"])
@@ -166,4 +167,5 @@ static func add_run_bonus(id: String) -> void:
 static func end_run() -> void:
 	run = {}
 	gear = []
+	RunXP.reset()
 	run_smokes = 0
