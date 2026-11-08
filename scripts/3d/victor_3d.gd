@@ -1,7 +1,8 @@
 extends CharacterBody3D
-## Victor in 3D. WASD moves (relative to the camera), left click, Space or J
+## Victor in 3D. WASD moves (relative to the camera). Left click or J
 ## punches: a snappy jab, jab, hook combo that hits everything in a
-## 120-degree arc in front of him.
+## 120-degree arc in front of him. Space dashes: a short burst the way he's
+## moving, untouchable while it lasts (numbers in tuning_3d.gd).
 ## Uses res://models/victor.glb (the rigged Meshy model) if it's there,
 ## otherwise a stand-in built from simple shapes.
 
@@ -72,6 +73,16 @@ var _swipe: MeshInstance3D
 var _swipe_mat: ShaderMaterial
 var _swipe_t := 1.0
 var _swipe_len := 0.12
+
+# the dash (Space)
+var _dash_t := 0.0          # seconds left of the current dash
+var _dash_cd := 0.0         # seconds until he can dash again
+var _dash_dir := Vector3.ZERO
+var _space_held := false
+var _dash_from := Vector3.ZERO
+var _streaks: Array[MeshInstance3D] = []
+var _streak_mat: StandardMaterial3D
+var _ghost_t := 0.0
 
 
 func _ready() -> void:
@@ -643,8 +654,15 @@ func _physics_process(delta: float) -> void:
 		to.y = 0
 		if to.length() > 0.2:
 			facing = to.normalized()
-	var punching := clicking or Input.is_key_pressed(KEY_SPACE) or Input.is_key_pressed(KEY_J)
-	if punching and _punch_cooldown <= 0.0:
+	# Space: dash (only on the press, holding it doesn't chain dashes)
+	_dash_t = maxf(0.0, _dash_t - delta)
+	_dash_cd = maxf(0.0, _dash_cd - delta)
+	var space := Input.is_key_pressed(KEY_SPACE)
+	if space and not _space_held and _dash_cd <= 0.0:
+		_start_dash(move)
+	_space_held = space
+	var punching := clicking or Input.is_key_pressed(KEY_J)
+	if punching and _punch_cooldown <= 0.0 and _dash_t <= 0.0:
 		_punch()
 	_rally_cooldown = maxf(0.0, _rally_cooldown - delta)
 	if Input.is_key_pressed(KEY_F) and _rally_cooldown <= 0.0:
@@ -653,6 +671,11 @@ func _physics_process(delta: float) -> void:
 	var speed := SPEED * (Tune.VICTOR_PUNCH_SLOWDOWN if _punch_time > 0.0 else 1.0) * (0.5 if _slow_t > 0.0 else 1.0) \
 			* (Tune.COFFEE_SPEED if coffee_t > 0.0 else 1.0) * (1.0 + Skills.value("speed"))
 	var flat := move * speed + _knock
+	if _dash_t > 0.0:
+		flat = _dash_dir * Tune.DASH_SPEED       # the burst overrides walking and knockback
+		_dash_trail(delta)
+	elif not _streaks.is_empty():
+		_end_trail()
 	_knock = _knock.move_toward(Vector3.ZERO, 30.0 * delta)
 	velocity = Vector3(flat.x, velocity.y, flat.z)
 	move_and_slide()
@@ -670,6 +693,129 @@ func _physics_process(delta: float) -> void:
 		_swipe_t = minf(1.0, _swipe_t + delta / _swipe_len)
 		_swipe_mat.set_shader_parameter("progress", _swipe_t)
 		_swipe.visible = _swipe_t < 1.0
+
+
+# --- the dash ----------------------------------------------------------------------
+
+## 0 = just dashed, 1 = ready again (for the HUD meter).
+func dash_ready() -> float:
+	return 1.0 - _dash_cd / _dash_cooldown()
+
+
+func _dash_cooldown() -> float:
+	return Tune.DASH_COOLDOWN * maxf(0.3, 1.0 - Skills.value("dash_cooldown"))
+
+
+func _start_dash(move: Vector3) -> void:
+	_dash_dir = move if move != Vector3.ZERO else facing   # standing still: dash the way he faces
+	facing = _dash_dir
+	_dash_t = Tune.DASH_TIME
+	_dash_cd = _dash_cooldown()
+	_knock = Vector3.ZERO
+	_punch_time = 0.0
+	if Tune.DASH_INVULNERABLE:
+		_invulnerable = maxf(_invulnerable, Tune.DASH_TIME + 0.06)
+	_dash_from = global_position
+	_ghost_t = 0.0
+	_shake(0.06)
+	_dust_puff(global_position)
+	# a few streaks of light at different heights that stretch behind him
+	if not _streak_mat:
+		_streak_mat = StandardMaterial3D.new()
+		_streak_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		_streak_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_end_trail()
+	for h: float in [0.35, 0.8, 1.25, 1.65, 2.0]:
+		var m := MeshInstance3D.new()
+		var box := BoxMesh.new()
+		box.size = Vector3(0.07 + 0.05 * randf(), 0.07, 1.0)
+		m.mesh = box
+		var mat := _streak_mat.duplicate() as StandardMaterial3D
+		mat.albedo_color = Color(1.0, 0.48, 0.12, 0.8) if h < 1.0 else Color(0.55, 0.8, 1.0, 0.6)
+		m.material_override = mat
+		m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		m.set_meta("h", h)
+		m.set_meta("side", randf_range(-0.35, 0.35))
+		get_tree().current_scene.add_child(m)
+		_streaks.append(m)
+
+
+## Keeps the streaks stretched from where the dash began to where he is now,
+## and leaves a fading after-image of him along the way.
+func _dash_trail(delta: float) -> void:
+	var a := _dash_from
+	var b := global_position
+	var flat := b - a
+	flat.y = 0
+	var length := flat.length()
+	if length < 0.05:
+		return
+	var dir := flat / length
+	var side := Vector3(-dir.z, 0, dir.x)
+	for m in _streaks:
+		var off: Vector3 = side * float(m.get_meta("side")) + Vector3(0, float(m.get_meta("h")), 0)
+		m.global_position = a.lerp(b, 0.5) + off - dir * 0.3
+		m.basis = Basis.looking_at(dir, Vector3.UP).scaled(Vector3(1, 1, length + 0.6))
+	_ghost_t -= delta
+	if _ghost_t <= 0.0:
+		_ghost_t = 0.04
+		_ghost(global_position)
+
+
+func _end_trail() -> void:
+	for m in _streaks:
+		if not is_instance_valid(m):
+			continue
+		var mat := m.material_override as StandardMaterial3D
+		var tw := m.create_tween().set_parallel()
+		tw.tween_property(mat, "albedo_color:a", 0.0, 0.22)
+		tw.tween_property(m, "scale:x", 0.2, 0.22)
+		tw.chain().tween_callback(m.queue_free)
+	_streaks.clear()
+
+
+## A see-through orange copy of his bulk that fades on the spot.
+func _ghost(at: Vector3) -> void:
+	var g := MeshInstance3D.new()
+	var cap := CapsuleMesh.new()
+	cap.radius = 0.5
+	cap.height = HEIGHT
+	g.mesh = cap
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.albedo_color = Color(0.95, 0.42, 0.1, 0.28)
+	g.material_override = m
+	g.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	g.position = at + Vector3(0, HEIGHT * 0.5, 0)
+	g.scale = Vector3(1.0, 1.0, 0.7)
+	get_tree().current_scene.add_child(g)
+	var tw := g.create_tween().set_parallel()
+	tw.tween_property(m, "albedo_color:a", 0.0, 0.25)
+	tw.tween_property(g, "scale", Vector3(0.6, 0.95, 0.4), 0.25)
+	tw.chain().tween_callback(g.queue_free)
+
+
+## Concrete dust kicked up where he pushed off.
+func _dust_puff(at: Vector3) -> void:
+	var ring := MeshInstance3D.new()
+	var torus := TorusMesh.new()
+	torus.inner_radius = 0.5
+	torus.outer_radius = 0.75
+	ring.mesh = torus
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.albedo_color = Color(0.75, 0.72, 0.66, 0.5)
+	ring.material_override = m
+	ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	ring.position = at + Vector3(0, 0.08, 0)
+	ring.scale = Vector3(0.6, 0.15, 0.6)
+	get_tree().current_scene.add_child(ring)
+	var tw := ring.create_tween().set_parallel()
+	tw.tween_property(ring, "scale", Vector3(2.0, 0.1, 2.0), 0.35).set_ease(Tween.EASE_OUT)
+	tw.tween_property(m, "albedo_color:a", 0.0, 0.35)
+	tw.chain().tween_callback(ring.queue_free)
 
 
 func _animate(walking: bool) -> void:
