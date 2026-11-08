@@ -11,6 +11,7 @@ extends RefCounted
 ##   Skills.earn(3)              add smokes (saved straight away)
 
 const SAVE_PATH := "user://prison_rep.cfg"
+const Equipment := preload("res://scripts/3d/equipment_3d.gd")
 
 ## The tree. Each skill raises one stat by `per` for every level bought.
 ##   branch: which column it sits in     cost: smokes for level 1 (then x2, x3...)
@@ -39,6 +40,13 @@ const TREE := [
 		"needs": "rally", "desc": "Recruits hit 25% harder and last longer"},
 ]
 
+## Display name of any reward id (perk or gear), for the floor picker.
+static func reward_name(id: String) -> String:
+	if Equipment.is_gear(id):
+		return Equipment.GEAR[id]["name"]
+	return RUN_BONUS[id]["name"]
+
+
 ## Perks a run bonus gives (one pick each). Same stat names as the tree.
 const RUN_BONUS := {
 	"max_hp": {"stat": "max_hp", "amount": 2.0, "name": "+2 MAX HEALTH"},
@@ -54,6 +62,7 @@ static var smokes := 0
 static var run_smokes := 0       # earned this run (shown on the game over screen)
 static var levels := {}          # skill id -> level bought
 static var run := {}             # stat -> amount, from this run's bonuses
+static var gear := []            # armour and weapon ids worn this run (equipment_3d.gd)
 static var _loaded := false
 
 
@@ -121,7 +130,7 @@ static func buy(id: String) -> bool:
 ## Total bonus for a stat: from the saved tree plus this run's perks.
 static func value(stat: String) -> float:
 	load_save()
-	var v: float = run.get(stat, 0.0)
+	var v: float = run.get(stat, 0.0) + Equipment.stat(gear, stat)
 	for s in TREE:
 		if s["stat"] == stat:
 			v += float(s["per"]) * level_of(s["id"])
@@ -139,7 +148,11 @@ static func gang_size() -> int:
 	return int(value("rally") + value("gang_size"))
 
 
+## A floor reward: a stat perk (RUN_BONUS) or a piece of gear (equipment_3d.gd).
 static func add_run_bonus(id: String) -> void:
+	if Equipment.is_gear(id):
+		Equipment.equip(gear, id)
+		return
 	var b: Dictionary = RUN_BONUS[id]
 	var stat: String = b["stat"]
 	var amount := float(b["amount"])
@@ -152,4 +165,5 @@ static func add_run_bonus(id: String) -> void:
 ## Victor went down: the run's perks are gone, the smokes are kept.
 static func end_run() -> void:
 	run = {}
+	gear = []
 	run_smokes = 0

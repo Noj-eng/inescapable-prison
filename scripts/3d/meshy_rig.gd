@@ -245,6 +245,11 @@ func _find_bones() -> void:
 		var n := skel.get_bone_name(i).to_lower()
 		if n.contains("leg") or n.contains("foot") or n.contains("toe") or n.contains("hips") or n.contains("pelvis"):
 			_leg_bones.append(i)
+	for side in ["r", "l"]:
+		var sh := _bone_named(["shoulder", "clavicle"], side)
+		if sh >= 0: bones["shoulder_" + side] = sh
+	var head := _bone_named(["head"], "")
+	if head >= 0: bones["head"] = head
 	var hips := _bone_named(["hips", "pelvis"], "")
 	if hips >= 0: bones["hips"] = hips
 	for name in ["spine2", "spine02", "chest", "spine1", "spine01", "spine"]:

@@ -15,6 +15,7 @@ const HEIGHT := 2.2               # metres: Victor is a big man
 const Tune := preload("res://scripts/3d/tuning_3d.gd")
 const SPEED := Tune.VICTOR_SPEED
 const Skills := preload("res://scripts/3d/skills_3d.gd")
+const Equipment := preload("res://scripts/3d/equipment_3d.gd")
 const RALLY_RADIUS := 10.0      # metres: prisoners this close hear the shout
 const PUNCH_REACH := 1.9
 const PUNCH_ARC := 0.5            # cos(60 degrees) -> 120-degree arc
@@ -43,6 +44,7 @@ var rage_t := 0.0
 var armour := 0
 var _armour_shell: MeshInstance3D
 var _rally_cooldown := 0.0
+var _gear_nodes := []       # armour/weapon pieces riding his bones
 var _armour_mat: StandardMaterial3D
 var _walk := 0.0
 var _t := 0.0
@@ -127,6 +129,20 @@ func _load_model() -> void:
 	# the arm and spine bones on top of it, so no punch clip is needed.
 	_mrig = MeshyRig.load_into(_rig, MeshyRig.find("victor.glb"), HEIGHT)
 	_model = _mrig.model
+	_gear_nodes = Equipment.dress(_mrig, Skills.gear)
+
+
+## Put on a new piece of gear mid-floor (and refresh the look).
+func wear(id: String) -> void:
+	Skills.add_run_bonus(id)
+	for n in _gear_nodes:
+		if is_instance_valid(n):
+			n.queue_free()
+	_gear_nodes = Equipment.dress(_mrig, Skills.gear) if _mrig else []
+	var new_max := 10 + int(Skills.value("max_hp"))
+	hp += maxi(0, new_max - max_hp)
+	max_hp = new_max
+	health_changed.emit(hp, max_hp)
 
 
 ## A placeholder Victor: a huge bald brute in a torn orange jumpsuit, arms
@@ -176,7 +192,7 @@ func _build_stand_in() -> void:
 func slow(seconds: float) -> void:
 	if rage_t > 0.0:
 		return             # hooch: too angry to notice
-	_slow_t = maxf(_slow_t, seconds)
+	_slow_t = maxf(_slow_t, seconds * maxf(0.2, 1.0 - Skills.value("stun_resist")))
 
 
 ## Picking up a powerup (see powerup_3d.gd for what each one is).
@@ -194,6 +210,11 @@ func power_up(kind: String) -> void:
 		"hooch":
 			rage_t = Tune.HOOCH_TIME * _pockets()
 			_slow_t = 0.0
+
+
+func _mrig_flash(c: Color) -> void:
+	if _mrig:
+		_mrig.flash(0.7, c)
 
 
 func _pockets() -> float:
@@ -278,11 +299,20 @@ func hit(from: Vector3, damage := 1, force := 6.0) -> void:
 		_armour_mat.albedo_color.a = 0.6
 		_shake(0.1)
 		return
+	if randf() < Skills.value("block"):
+		# armour: the hit glances off, a shove and a spark but no damage
+		var glance := global_position - from
+		glance.y = 0
+		_knock = glance.normalized() * force * 0.3
+		_invulnerable = 0.4
+		_mrig_flash(Color(0.8, 0.9, 1.0))
+		_shake(0.08)
+		return
 	hp = maxi(0, hp - damage)
 	health_changed.emit(hp, max_hp)
 	var away := global_position - from
 	away.y = 0
-	_knock = away.normalized() * force
+	_knock = away.normalized() * force * maxf(0.2, 1.0 - Skills.value("knock_resist"))
 	_hurt = 0.25
 	_invulnerable = 0.8
 	_shake(0.25)
@@ -310,10 +340,11 @@ func _punch() -> void:
 	var raging := rage_t > 0.0
 	if raging:
 		_punch_cooldown *= 0.8
-	var reach := PUNCH_REACH * (1.25 if heavy else 1.0) * (1.4 if raging else 1.0)
-	var arc := 0.26 if raging else PUNCH_ARC          # rage: a 150-degree arc
+	_punch_cooldown /= maxf(0.4, 1.0 + Skills.value("punch_speed"))   # shiv: faster, pipe: slower
+	var reach := PUNCH_REACH * (1.25 if heavy else 1.0) * (1.4 if raging else 1.0) * (1.0 + Skills.value("reach"))
+	var arc := (0.26 if raging else PUNCH_ARC) - Skills.value("arc")   # rage or chain: wider
 	var power := (2.0 if heavy else 1.0) * (2.0 if knuckles_t > 0.0 else 1.0) * (1.0 + Skills.value("damage"))
-	var force := (9.0 if heavy else 5.5) * (1.8 if raging else 1.0)
+	var force := (9.0 if heavy else 5.5) * (1.8 if raging else 1.0) * (1.0 + Skills.value("knockback"))
 	_start_swipe(reach, heavy)
 	var landed := false
 	# "breakables": things he can smash, like the armory vault doors
@@ -458,6 +489,7 @@ func _physics_process(delta: float) -> void:
 	_walk = _walk + delta * 9.0 if move != Vector3.ZERO else move_toward(_walk, roundf(_walk / PI) * PI, delta * 6.0)
 	_animate(move != Vector3.ZERO)
 
+	Equipment.keep_scale(_gear_nodes)
 	if _swipe_t < 1.0:
 		_swipe_t = minf(1.0, _swipe_t + delta / _swipe_len)
 		_swipe_mat.set_shader_parameter("progress", _swipe_t)
