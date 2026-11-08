@@ -10,6 +10,7 @@ extends Node3D
 const Look := preload("res://scripts/3d/look_3d.gd")
 const Tune := preload("res://scripts/3d/tuning_3d.gd")
 const SOLID := "#BbtdxocT"
+const Skills := preload("res://scripts/3d/skills_3d.gd")
 
 ## name: shown when picked up    tint: colour of the glow and ring
 ## weight: how common it is      say: the line shown on pickup
@@ -101,7 +102,7 @@ static func scatter(parent: Node, map: Array, rng: RandomNumberGenerator, count:
 
 ## Called when an enemy goes down: now and then it leaves something behind.
 static func drop(parent: Node, at: Vector3, rng: RandomNumberGenerator) -> void:
-	if rng.randf() < Tune.POWERUP_DROP_CHANCE:
+	if rng.randf() < Tune.POWERUP_DROP_CHANCE + Skills.value("powerup_luck"):
 		make(parent, Vector3(at.x, 0, at.z), pick_kind(rng))
 
 

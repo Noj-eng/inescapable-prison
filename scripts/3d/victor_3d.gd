@@ -14,6 +14,8 @@ const MeshyRig := preload("res://scripts/3d/meshy_rig.gd")
 const HEIGHT := 2.2               # metres: Victor is a big man
 const Tune := preload("res://scripts/3d/tuning_3d.gd")
 const SPEED := Tune.VICTOR_SPEED
+const Skills := preload("res://scripts/3d/skills_3d.gd")
+const RALLY_RADIUS := 10.0      # metres: prisoners this close hear the shout
 const PUNCH_REACH := 1.9
 const PUNCH_ARC := 0.5            # cos(60 degrees) -> 120-degree arc
 const PUNCH_COOLDOWN := 0.24
@@ -40,6 +42,7 @@ var coffee_t := 0.0
 var rage_t := 0.0
 var armour := 0
 var _armour_shell: MeshInstance3D
+var _rally_cooldown := 0.0
 var _armour_mat: StandardMaterial3D
 var _walk := 0.0
 var _t := 0.0
@@ -63,6 +66,10 @@ var _swipe_len := 0.12
 
 func _ready() -> void:
 	add_to_group("player")
+	# skills from the PRISON REP tree, plus this run's perks
+	max_hp = 10 + int(Skills.value("max_hp"))
+	hp = max_hp
+	armour = int(Skills.value("armour_start"))
 	var shape := CollisionShape3D.new()
 	var cap := CapsuleShape3D.new()
 	cap.radius = 0.45
@@ -179,14 +186,73 @@ func power_up(kind: String) -> void:
 			hp = mini(max_hp, hp + Tune.MEDKIT_HEAL)
 			health_changed.emit(hp, max_hp)
 		"knuckles":
-			knuckles_t = Tune.KNUCKLES_TIME
+			knuckles_t = Tune.KNUCKLES_TIME * _pockets()
 		"coffee":
-			coffee_t = Tune.COFFEE_TIME
+			coffee_t = Tune.COFFEE_TIME * _pockets()
 		"mattress":
-			armour = Tune.MATTRESS_HITS
+			armour = maxi(armour, Tune.MATTRESS_HITS)
 		"hooch":
-			rage_t = Tune.HOOCH_TIME
+			rage_t = Tune.HOOCH_TIME * _pockets()
 			_slow_t = 0.0
+
+
+func _pockets() -> float:
+	return 1.0 + Skills.value("powerup_time")      # Deep Pockets skill
+
+
+## F: shout for the prisoners nearby to join Victor's gang.
+func _rally() -> void:
+	_rally_cooldown = 1.0
+	var level := get_tree().current_scene
+	if not Skills.can_rally():
+		if level.has_method("_say"):
+			level._say("Nobody listens to you yet.\nBuy RALLY THE PRISONERS in the skill tree.", Color(0.62, 0.7, 0.82), 2.0)
+		return
+	var room := Skills.gang_size()
+	for g in get_tree().get_nodes_in_group("prisoners"):
+		if g.get("recruited"):
+			room -= 1
+	var near := []
+	for g in get_tree().get_nodes_in_group("prisoners"):
+		if not g.get("recruited") and g.has_method("recruit") and g.global_position.distance_to(global_position) < RALLY_RADIUS:
+			near.append(g)
+	near.sort_custom(func(a, b): return a.global_position.distance_to(global_position) < b.global_position.distance_to(global_position))
+	var joined := 0
+	for g in near:
+		if joined >= room:
+			break
+		g.power = 1.0 + Skills.value("recruit_power")     # Hardened Recruits skill
+		g.recruit(self)
+		joined += 1
+	_shake(0.12)
+	_shout_ring()
+	if level.has_method("_say"):
+		if joined > 0:
+			level._say("%d JOINED THE GANG." % joined, Color("4dd8ff"), 1.6)
+		elif room <= 0:
+			level._say("Your gang is full (%d)." % Skills.gang_size(), Color("4dd8ff"), 1.6)
+		else:
+			level._say("No prisoners close enough to hear you.", Color(0.62, 0.7, 0.82), 1.6)
+
+
+func _shout_ring() -> void:
+	var ring := MeshInstance3D.new()
+	var torus := TorusMesh.new()
+	torus.inner_radius = 0.9
+	torus.outer_radius = 1.0
+	ring.mesh = torus
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.albedo_color = Color(0.3, 0.85, 1.0, 0.8)
+	ring.material_override = m
+	ring.position = global_position + Vector3(0, 0.1, 0)
+	ring.scale = Vector3(1, 0.2, 1)
+	get_tree().current_scene.add_child(ring)
+	var tw := ring.create_tween().set_parallel()
+	tw.tween_property(ring, "scale", Vector3(RALLY_RADIUS, 0.2, RALLY_RADIUS), 0.5).set_ease(Tween.EASE_OUT)
+	tw.tween_property(m, "albedo_color:a", 0.0, 0.5)
+	tw.chain().tween_callback(ring.queue_free)
 
 
 ## What's active right now, for the HUD: e.g. "KNUCKLES 8  ARMOUR x2".
@@ -246,7 +312,7 @@ func _punch() -> void:
 		_punch_cooldown *= 0.8
 	var reach := PUNCH_REACH * (1.25 if heavy else 1.0) * (1.4 if raging else 1.0)
 	var arc := 0.26 if raging else PUNCH_ARC          # rage: a 150-degree arc
-	var power := (2.0 if heavy else 1.0) * (2.0 if knuckles_t > 0.0 else 1.0)
+	var power := (2.0 if heavy else 1.0) * (2.0 if knuckles_t > 0.0 else 1.0) * (1.0 + Skills.value("damage"))
 	var force := (9.0 if heavy else 5.5) * (1.8 if raging else 1.0)
 	_start_swipe(reach, heavy)
 	var landed := false
@@ -375,9 +441,12 @@ func _physics_process(delta: float) -> void:
 	var punching := clicking or Input.is_key_pressed(KEY_SPACE) or Input.is_key_pressed(KEY_J)
 	if punching and _punch_cooldown <= 0.0:
 		_punch()
+	_rally_cooldown = maxf(0.0, _rally_cooldown - delta)
+	if Input.is_key_pressed(KEY_F) and _rally_cooldown <= 0.0:
+		_rally()
 
 	var speed := SPEED * (Tune.VICTOR_PUNCH_SLOWDOWN if _punch_time > 0.0 else 1.0) * (0.5 if _slow_t > 0.0 else 1.0) \
-			* (Tune.COFFEE_SPEED if coffee_t > 0.0 else 1.0)
+			* (Tune.COFFEE_SPEED if coffee_t > 0.0 else 1.0) * (1.0 + Skills.value("speed"))
 	var flat := move * speed + _knock
 	_knock = _knock.move_toward(Vector3.ZERO, 30.0 * delta)
 	velocity = Vector3(flat.x, velocity.y, flat.z)

@@ -14,6 +14,8 @@ const PrisonGen := preload("res://scripts/3d/prison_gen.gd")
 const Themes := preload("res://scripts/3d/themes_3d.gd")
 const Types := preload("res://scripts/3d/enemy_types_3d.gd")
 const Powerup := preload("res://scripts/3d/powerup_3d.gd")
+const Skills := preload("res://scripts/3d/skills_3d.gd")
+const SkillTree := preload("res://scripts/3d/skill_tree_3d.gd")
 const LIGHT_RANGE := 30.0   # metres around Victor where lamps are switched on
 const Look := preload("res://scripts/3d/look_3d.gd")
 const VictorScript := preload("res://scripts/3d/victor_3d.gd")
@@ -104,6 +106,8 @@ var _health_bar: Control
 var _hostiles: Control
 var _buffs: Control
 var _buff_text := ""
+var _smokes: Control
+var _smokes_shown := -1
 var _message: Control
 var _message_tween: Tween
 var _over_panel: ColorRect
@@ -727,6 +731,9 @@ func _process(delta: float) -> void:
 	if bt != _buff_text:
 		_buff_text = bt
 		_buffs.text = bt
+	if Skills.smokes != _smokes_shown:
+		_smokes_shown = Skills.smokes
+		_smokes.text = "SMOKES  %d" % Skills.smokes
 	# only light what's near Victor: a big floor has hundreds of lamps
 	_cull_t -= delta
 	if _cull_t <= 0.0:
@@ -766,13 +773,21 @@ func _process(delta: float) -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if _game_over and event is InputEventKey and event.pressed and event.keycode == KEY_R:
-		Engine.time_scale = 1.0
-		get_tree().reload_current_scene()
+		_new_run()
+
+
+## After a game over: back to floor 1. Smokes and skills are kept.
+func _new_run() -> void:
+	Engine.time_scale = 1.0
+	depth = 1
+	Skills.end_run()
+	get_tree().reload_current_scene()
 
 
 func _on_enemy_defeated(at: Vector3) -> void:
 	enemies_left -= 1
 	Powerup.drop(self, at, _rng)
+	Skills.earn(1 + depth / 3)          # smokes: deeper guards carry more
 	_hostiles.text = "HOSTILES  %02d / %02d" % [enemies_left, total_enemies]
 	if enemies_left == 0:
 		_lift_mat.albedo_color = Color(0.3, 1.0, 0.5)
@@ -788,6 +803,11 @@ func _on_player_died() -> void:
 	_game_over = true
 	await get_tree().create_timer(1.0).timeout
 	_over_panel.visible = true
+	# then the PRISON REP screen: spend smokes on skills that carry over
+	await get_tree().create_timer(1.6).timeout
+	var tree := SkillTree.new()
+	tree.new_run.connect(_new_run)
+	add_child(tree)
 
 
 # --- HUD (same neon style as the 2D game) ---------------------------------------------
@@ -806,6 +826,7 @@ func _build_hud() -> void:
 	_health_bar.segments = 20
 	_hud.add_child(_health_bar)
 	_buffs = _chroma("", Vector2(28, 118), Vector2(600, 18), 12, Color("ffd23f"))
+	_smokes = _chroma("", Vector2(1068, 40), Vector2(200, 16), 11, Color("ffd23f"))
 	_hostiles = _chroma("HOSTILES  %02d / %02d" % [enemies_left, total_enemies], Vector2(1068, 20), Vector2(200, 16), 11, Color("ff7a4a"))
 	_message = _chroma("", Vector2(0, 600), Vector2(1280, 90), 20, Color.WHITE)
 	for l in _message.get_children():
