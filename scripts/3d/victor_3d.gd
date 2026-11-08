@@ -65,6 +65,14 @@ func _ready() -> void:
 
 	_rig = Node3D.new()
 	add_child(_rig)
+	# a soft warm light that travels with Victor, so he reads in the dark
+	var glow := OmniLight3D.new()
+	glow.light_color = Color(1.0, 0.85, 0.7)
+	glow.light_energy = Tune.VICTOR_LIGHT
+	glow.omni_range = 6.0
+	glow.omni_attenuation = 1.2
+	glow.position = Vector3(1.2, 3.2, 1.2)    # up and toward the camera
+	add_child(glow)
 	if MeshyRig.find("victor.glb") != "":
 		_load_model()
 	else:

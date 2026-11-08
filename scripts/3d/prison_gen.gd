@@ -18,13 +18,25 @@ var _rng := RandomNumberGenerator.new()
 var _g: Array = []       # rows of single-letter strings
 var _w := 0
 var _h := 0
+var _corr := {}          # every tile a corridor runs through: kept clear
 
 
 ## blocks_x, blocks_y: size in blocks. winding: 0 = lots of shortcuts,
 ## 1 = a pure maze with one route. density: enemies per room, on average.
 ## robot_share: 0..1 of enemies that are robots.
 func generate(seed_value: int, blocks_x: int, blocks_y: int, winding: float, density: float, robot_share: float) -> Array:
+	# build, check there's a way through, and try again if not
+	for attempt in 20:
+		var m := _generate(seed_value + attempt * 7919, blocks_x, blocks_y, winding, density, robot_share)
+		if reachable(m):
+			return m
+		push_warning("Prison floor %d had no way through; rebuilding." % (seed_value + attempt * 7919))
+	return _generate(seed_value, blocks_x, blocks_y, 1.0, density, robot_share)
+
+
+func _generate(seed_value: int, blocks_x: int, blocks_y: int, winding: float, density: float, robot_share: float) -> Array:
 	_rng.seed = seed_value
+	_corr = {}
 	_w = blocks_x * BLOCK_W + 1
 	_h = blocks_y * BLOCK_H + 1
 	_g = []
@@ -117,7 +129,7 @@ func generate(seed_value: int, blocks_x: int, blocks_y: int, winding: float, den
 			_put(_centre(r), "E")
 			continue
 		var roll := _rng.randf()
-		if roll < 0.35 and north_free and r.size.x >= 9 and r.size.y >= 8:
+		if roll < 0.35 and north_free and r.size.x >= 9 and r.size.y >= 8 and not _corridor_in(Rect2i(r.position.x - 1, r.position.y - 1, r.size.x + 2, 6)):
 			_dress_cells(r)
 		elif roll < 0.6:
 			_dress_hall(r)
@@ -170,7 +182,7 @@ func _dress_hall(r: Rect2i) -> void:
 	for y in range(r.position.y + 2, r.end.y - 1, 4):
 		for x in range(r.position.x + 2, r.end.x - 1, 5):
 			if _rng.randf() < 0.7:
-				_put(Vector2i(x, y), "o")
+				_prop(Vector2i(x, y), "o")
 	_scatter(r, "v", 2)
 	_scatter(r, "x", _rng.randi_range(0, 2))
 
@@ -179,7 +191,7 @@ func _dress_guard_post(r: Rect2i) -> void:
 	var y := r.position.y
 	for x in range(r.position.x + 1, mini(r.end.x - 1, r.position.x + 6)):
 		if _rng.randf() < 0.7:
-			_put(Vector2i(x, y), "c")
+			_prop(Vector2i(x, y), "c")
 	_scatter(r, "d", 2)
 	_scatter(r, "v", 1)
 
@@ -189,7 +201,7 @@ func _dress_storage(r: Rect2i) -> void:
 		var p := Vector2i(_rng.randi_range(r.position.x + 1, r.end.x - 3), _rng.randi_range(r.position.y + 1, r.end.y - 3))
 		for d in [Vector2i(0, 0), Vector2i(1, 0), Vector2i(0, 1)]:
 			if _rng.randf() < 0.8 and _tile(p + d) == ".":
-				_put(p + d, "x")
+				_prop(p + d, "x")
 
 
 # --- helpers --------------------------------------------------------------------
@@ -198,7 +210,7 @@ func _scatter(r: Rect2i, ch: String, count: int) -> void:
 	for i in count:
 		var p := _free_spot(r)
 		if p.x >= 0:
-			_put(p, ch)
+			_prop(p, ch)
 
 
 func _free_spot(r: Rect2i) -> Vector2i:
@@ -221,6 +233,16 @@ func _clear_around(p: Vector2i) -> void:
 			_put(p + Vector2i(dx, dy), ".")
 
 
+## Places a prop unless it would sit in (or right beside) a corridor's path.
+func _prop(p: Vector2i, ch: String) -> void:
+	for dy in [-1, 0, 1]:
+		for dx in [-1, 0, 1]:
+			if _corr.has(p + Vector2i(dx, dy)):
+				return
+	if _tile(p) == ".":
+		_put(p, ch)
+
+
 func _carve(r: Rect2i) -> void:
 	for y in range(r.position.y, r.end.y):
 		for x in range(r.position.x, r.end.x):
@@ -232,8 +254,45 @@ func _corridor(a: Vector2i, b: Vector2i) -> void:
 	var hi := Vector2i(maxi(a.x, b.x) + 1, maxi(a.y, b.y) + 1)
 	for y in range(lo.y, hi.y + 1):
 		for x in range(lo.x, hi.x + 1):
-			if x > 0 and y > 0 and x < _w - 1 and y < _h - 1 and _tile(Vector2i(x, y)) == "#":
-				_put(Vector2i(x, y), ".")
+			if x > 0 and y > 0 and x < _w - 1 and y < _h - 1:
+				_corr[Vector2i(x, y)] = true
+				if _tile(Vector2i(x, y)) == "#":
+					_put(Vector2i(x, y), ".")
+
+
+func _corridor_in(r: Rect2i) -> bool:
+	for p in _corr:
+		if r.has_point(p):
+			return true
+	return false
+
+
+## Can Victor walk from the start to the lift? (same solid tiles as the level)
+func reachable(map: Array) -> bool:
+	var start := Vector2i(-1, -1)
+	var goal := Vector2i(-1, -1)
+	for y in map.size():
+		var x := (map[y] as String).find("R")
+		if x >= 0: start = Vector2i(x, y + 1)
+		x = (map[y] as String).find("E")
+		if x >= 0: goal = Vector2i(x, y)
+	if start.x < 0 or goal.x < 0:
+		return false
+	var seen := {start: true}
+	var queue: Array[Vector2i] = [start]
+	while queue.size() > 0:
+		var c: Vector2i = queue.pop_front()
+		if c == goal:
+			return true
+		for d in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+			var n: Vector2i = c + d
+			if seen.has(n) or n.y < 0 or n.y >= map.size() or n.x < 0 or n.x >= (map[n.y] as String).length():
+				continue
+			if "#Bbtdxoc".contains((map[n.y] as String)[n.x]):
+				continue
+			seen[n] = true
+			queue.append(n)
+	return false
 
 
 func _centre(r: Rect2i) -> Vector2i:

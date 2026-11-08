@@ -19,6 +19,12 @@ const AFTERSHOCK_MIN_GAP := 8.0    # seconds between tremors, at least...
 const AFTERSHOCK_MAX_GAP := 15.0   # ...and at most
 const AFTERSHOCK_SHAKE := 0.45     # camera shake strength
 
+# --- Light -----------------------------------------------------------------------
+const AMBIENT_LIGHT := 0.7         # base light everywhere (was 0.4): higher = less black
+const EXPOSURE := 1.2              # overall brightness of the camera
+const LAMP_BRIGHTNESS := 14.0      # overhead lamps
+const VICTOR_LIGHT := 1.3          # a soft light that follows Victor so he never gets lost
+
 # --- Procedural prison floors -----------------------------------------------------
 const LEVEL_PROCEDURAL := true     # false = the hand-made Cell Block C map
 const LEVEL_SEED := 0              # 0 = a new prison every run; any other number = the same layout every time

@@ -137,10 +137,10 @@ func _build_environment() -> void:
 	env.background_mode = Environment.BG_COLOR
 	env.background_color = Color(0.015, 0.017, 0.024)
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.42, 0.47, 0.6)
-	env.ambient_light_energy = 0.4
+	env.ambient_light_color = Color(0.5, 0.55, 0.68)
+	env.ambient_light_energy = Tune.AMBIENT_LIGHT
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
-	env.tonemap_exposure = 1.15
+	env.tonemap_exposure = Tune.EXPOSURE
 	env.ssao_enabled = true
 	env.ssao_radius = 1.6
 	env.ssao_intensity = 2.8
@@ -153,7 +153,7 @@ func _build_environment() -> void:
 	env.fog_light_color = Color(0.16, 0.18, 0.24)
 	env.fog_density = 0.008
 	env.volumetric_fog_enabled = true
-	env.volumetric_fog_density = 0.02
+	env.volumetric_fog_density = 0.012
 	env.volumetric_fog_albedo = Color(0.75, 0.78, 0.85)
 	env.volumetric_fog_length = 80.0
 	env.adjustment_enabled = true
@@ -418,9 +418,9 @@ func _overhead_lamps() -> void:
 			var at := cell_pos(x, y)
 			var spot := SpotLight3D.new()
 			spot.light_color = Color(0.85, 0.92, 1.0)
-			spot.light_energy = 14.0
-			spot.spot_range = 10.0
-			spot.spot_angle = 42.0
+			spot.light_energy = Tune.LAMP_BRIGHTNESS
+			spot.spot_range = 12.0
+			spot.spot_angle = 58.0
 			spot.spot_attenuation = 0.5
 			spot.spot_angle_attenuation = 2.5
 			spot.light_volumetric_fog_energy = 1.6
@@ -669,7 +669,7 @@ func _process(delta: float) -> void:
 	_quake = maxf(0.0, _quake - delta)
 	for i in _lamps.size():
 		var flicker := _quake > 0.0 and _rng.randf() < 0.35 + 0.1 * (i % 3)
-		_lamps[i].light_energy = 14.0 * (0.12 if flicker else 1.0)
+		_lamps[i].light_energy = Tune.LAMP_BRIGHTNESS * (0.12 if flicker else 1.0)
 	_shake = move_toward(_shake, 0.0, delta * 1.5)
 	# a moment to get his bearings; a few steps out and the alarm goes off
 	if calm and not _game_over:
@@ -717,7 +717,7 @@ func _process(delta: float) -> void:
 		rel.y = 0
 		var depth := rel.dot(toward_cam)
 		var side := absf(rel.dot(across))
-		var hide := depth > 0.6 and depth < 9.0 and side < 2.4
+		var hide := depth > 0.6 and depth < 16.0 and side < 4.5
 		w.transparency = move_toward(w.transparency, 0.75 if hide else 0.0, delta * 4.0)
 
 
