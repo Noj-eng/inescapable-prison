@@ -62,3 +62,10 @@ const COFFEE_TIME := 10.0          # seconds of extra speed...
 const COFFEE_SPEED := 1.4          # ...this many times faster
 const MATTRESS_HITS := 3           # hits the mattress armour soaks
 const HOOCH_TIME := 8.0            # seconds of rage
+
+# --- Themed floors (each floor has one theme) ---------------------------------------
+const FLOOR_THEME := ""            # "" = floor 1 is Victor's Cell Block, then you pick at each lift.
+                                   # Or force one: "cellblock", "cafeteria", "armory", "solitary", "yard"
+const PRISONER_AMOUNT := 1.0       # 1 = normal crowd of panicking prisoners, 0 = none, 2 = twice as many
+const PRISONER_SPEED := 4.6        # they run too: it's an earthquake
+const VAULT_DOOR_HITS := 8         # punches to smash an armory vault door open

@@ -255,7 +255,10 @@ func _build_level() -> void:
 					_lift(at)
 					_lift_at = at
 				"R":
-					_broken_rig(at)
+					if depth <= 1 or not Tune.LEVEL_PROCEDURAL:
+						_broken_rig(at)     # the one rig: Victor's Cell Block, floor 1
+					else:
+						Themes.arrival_lift(self, at)
 					start = at + Vector3(0, 0, CELL)
 				"T":
 					_spawn_enemy("turret", at)
@@ -683,7 +686,7 @@ func path_length(from: Vector3, to: Vector3) -> int:
 
 func _title() -> String:
 	if Tune.LEVEL_PROCEDURAL:
-		return "%s  //  FLOOR -%d" % [Themes.title(theme), depth]
+		return "%s  //  FLOOR -%d" % [Themes.title(theme, depth), depth]
 	return "CELL BLOCK C  //  3D TEST"
 
 
@@ -748,10 +751,7 @@ func _process(delta: float) -> void:
 		to_lift.y = 0
 		if to_lift.length() < 1.1:
 			_descending = true
-			depth += 1
-			shake(0.3)
-			_say("GOING DOWN.\nFloor -%d. Still no way out." % depth, Color("ff7a4a"), 2.0)
-			get_tree().create_timer(1.6).timeout.connect(get_tree().reload_current_scene)
+			Themes.choose_next_floor(self)   # pick the next floor's theme, then go down
 	camera.h_offset = _rng.randf_range(-1, 1) * _shake
 	camera.v_offset = _rng.randf_range(-1, 1) * _shake
 	# red warning lights pulse, the containment glass flickers
